@@ -1,0 +1,7 @@
+#!/bin/bash
+
+# This file can be placed into ~/.local/share/nautilus/scripts/ and will show up in the right click menu under "scripts"
+# Alternately, the audio_sidecar binary can be dropped directly into this directory
+
+# Todo must handle multiple file paths (or at least discarding those after the first one)
+/speed/programs/audio-sidecar/cmake-build-debug/audio_sidecar "$NAUTILUS_SCRIPT_SELECTED_FILE_PATHS"

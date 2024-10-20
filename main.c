@@ -17,7 +17,6 @@
 static SDL_Window *window = NULL;
 static SDL_Renderer *renderer = NULL;
 static SDL_AudioStream *stream = NULL;
-static int total_samples_generated = 0;
 
 static FILE *output_wav = NULL;
 static short output_buffer[44100 * 60 * 60]; // 1 hour of audio buffer
@@ -25,11 +24,56 @@ static int output_buffer_index = 0;
 
 static SDL_AudioStream *scarlettStream = NULL;
 
-static int amplitude = 0;
+#define MAX_PATH_LENGTH 1024
+static char filepath[MAX_PATH_LENGTH]; // todo check if max len is acceptable
+
+// todo add error checking, logging, and dad friendly error reporting
+// todo add safeguards such as not overwriting existing recordings and/or saving old recordings to a backup directory on overwrite
+// todo append new data to file and fixup header when recording to an existing file
+// todo show time recorded so far
+// todo add big button to stop recording/exit
+// todo handle multiple paths sent to this program i.e. drop everything after first
+// todo clean up visualization
+// todo warn when clipping occurs
+// todo figure out how to add to right click menu in nautilus without additional click into scripts submenu
+// todo write ffmpeg command such that it will never prompt for user input, such as when attempting to overwrite a file
+// todo pin sdl3 version
+// todo test on other distros
+// todo organize better / refactor / split into separate source files
+//
 
 /* This function runs once at startup. */
 SDL_AppResult SDL_AppInit(void **appstate, int argc, char *argv[])
 {
+
+    if (argc > 1)
+    {
+        int len = strlen(argv[1]);
+        if (len > MAX_PATH_LENGTH - 5) // - 5 for ".flac"
+        {
+            len = MAX_PATH_LENGTH - 5;
+        }
+        // todo remove old file extension first
+        memcpy(filepath, argv[1], len);
+        // walk backward and replace first "." with null to remove the file extension. todo do this better
+        for (int i = len; i > 1; i--)
+        {
+            if (filepath[i] == '/')
+            {
+                break; // do not continue past the filename
+            }
+
+            if (filepath[i] == '.')
+            {
+                filepath[i] = '\0';
+                break;
+            }
+        }
+    } else
+    {
+        memcpy(filepath, "/tmp/output", 11);
+    }
+
     SDL_AudioSpec spec;
 
     if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_EVENTS)) {
@@ -106,7 +150,7 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char *argv[])
 
     // SDL_Log("Err: %s", SDL_GetError());
 
-    output_wav = fopen("/tmp/output.wav", "wb");
+
 
     SDL_free(ids);
     return SDL_APP_CONTINUE;  /* carry on with the program! */
@@ -239,6 +283,9 @@ struct WAV_HEADER // little endian
 
 int writeAudio(FILE *file, short *data, int length)
 {
+    // todo write audio periodically so a crash doesn't lose data
+
+
 
     struct WAV_HEADER header = {
         .FileTypeBlockID = "RIFF",
@@ -268,7 +315,6 @@ int writeAudio(FILE *file, short *data, int length)
 /* This function runs once at shutdown. */
 void SDL_AppQuit(void *appstate)
 {
-    // fwrite(output_wav, output_buffer, sizeof(short), output_buffer_index);
     /* SDL will clean up the window/renderer for us. */
 
     SDL_FlushAudioStream(scarlettStream);
@@ -293,8 +339,13 @@ void SDL_AppQuit(void *appstate)
     printf("length: %d", output_buffer_index);
 
 
+    output_wav = fopen("/tmp/output.wav", "wb");
     writeAudio(output_wav, output_buffer, output_buffer_index);
 
-    system("ffmpeg -i /tmp/output.wav -af aformat=s16:41000 -compression_level 12 /tmp/output.flac");
+    char command[MAX_PATH_LENGTH + 1000];
+
+    snprintf(command, sizeof(command), "ffmpeg -i /tmp/output.wav -af aformat=s16:41000 -compression_level 12 '%s.flac'", filepath);
+
+    system(command);
 }
 
