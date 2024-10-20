@@ -9,6 +9,7 @@
 #define SDL_MAIN_USE_CALLBACKS 1  /* use the callbacks instead of main() */
 #include <limits.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_main.h>
 
@@ -19,7 +20,7 @@ static SDL_AudioStream *stream = NULL;
 static int total_samples_generated = 0;
 
 static FILE *output_wav = NULL;
-static short output_buffer[44100 * 3]; // 3 seconds of audio
+static short output_buffer[44100 * 60 * 60]; // 1 hour of audio buffer
 static int output_buffer_index = 0;
 
 static SDL_AudioStream *scarlettStream = NULL;
@@ -161,48 +162,53 @@ SDL_AppResult SDL_AppIterate(void *appstate)
     SDL_RenderFillRect(renderer, &rect);
 
 
+
     short data[44100] = {0};
     int bytesRead = SDL_GetAudioStreamData(scarlettStream, &data, sizeof(data));
 
-    if (bytesRead > 0)
+
+    for (int i = 0; i < bytesRead / sizeof(short); i++)
     {
-        // int average = 0;
-        // for (int i = 0; i < bytesRead / sizeof(short); i++)
-        // {
-        //     if (data[i] > 0)
-        //     {
-        //         average += data[i] / bytesRead;
-        //     }
-        // }
-
-
-
-        int max = 0;
-        for (int i = 0; i < bytesRead / sizeof(short); i++)
+        if (output_buffer_index < sizeof(output_buffer) / sizeof(short))
         {
-            if (output_buffer_index < sizeof(output_buffer) / sizeof(short))
-            {
-                output_buffer[output_buffer_index] = data[i];
-                output_buffer_index++;
-            }
-
-            if (data[i] > max)
-            {
-                max = data[i];
-            }
+            output_buffer[output_buffer_index] = data[i];
+            output_buffer_index++;
         }
+    }
+
+
+
 
         // amplitude = (average * 300) /2500;
-        amplitude = (max * 300) / (SHRT_MAX / 2);
+        // amplitude = (max * 300) / (SHRT_MAX / 2);
 
         // SDL_Log("%d", average);
 
-    }
+
     SDL_SetRenderDrawColor(renderer, 255, 150, 255, 255);  /* blue, full alpha */
-    rect.x = rect.y = 100;
-    rect.w = 440;
-    rect.h = amplitude;
-    SDL_RenderFillRect(renderer, &rect);
+
+    int numBars = 100;
+    rect.y = 100;
+    rect.w = 440 / numBars;
+
+    int averageSamples = output_buffer_index / numBars;
+    for (int i = 0; i < numBars; i++)
+    {
+        rect.x = 100 + rect.w * i;
+
+        int max = SHRT_MIN;
+        for (int j = 0; j < averageSamples; j++)
+        {
+            if (output_buffer[averageSamples * i + j] > max)
+            {
+                max = output_buffer[averageSamples * i + j];
+            }
+        }
+        rect.h = (max * 300) / (SHRT_MAX / 2);
+
+        SDL_RenderFillRect(renderer, &rect);
+
+    }
 
 
     SDL_RenderPresent(renderer);
@@ -255,6 +261,7 @@ int writeAudio(FILE *file, short *data, int length)
 
     fwrite(&header, 1, sizeof(header), file);
     fwrite(data, sizeof(short), length, file);
+    fflush(file);
     fclose(file);
 }
 
@@ -287,5 +294,7 @@ void SDL_AppQuit(void *appstate)
 
 
     writeAudio(output_wav, output_buffer, output_buffer_index);
+
+    system("ffmpeg -i /tmp/output.wav -af aformat=s16:41000 -compression_level 12 /tmp/output.flac");
 }
 
