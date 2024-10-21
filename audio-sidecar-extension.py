@@ -22,7 +22,7 @@ class TestExtension(GObject.GObject, Nautilus.MenuProvider):
             menu: Nautilus.MenuItem,
             file: Nautilus.FileInfo,
     ) -> None:
-        subprocess.Popen(['/speed/programs/audio-sidecar/cmake-build-debug/audio_sidecar', file.get_name()])
+        subprocess.Popen(['/speed/programs/audio-sidecar/cmake-build-debug/audio_sidecar', file.get_location().get_path()])
 
     def get_file_items(
             self,

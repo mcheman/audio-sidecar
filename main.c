@@ -40,7 +40,13 @@ static char filepath[MAX_PATH_LENGTH]; // todo check if max len is acceptable
 // todo pin sdl3 version
 // todo test on other distros
 // todo organize better / refactor / split into separate source files
-//
+// todo see if you can get 24bit audio working
+// todo add message when quitting if writing out is taking awhile (though probably not needed if writing out as we go)
+// todo create a slideshow application that plays the audio with the corresponding picture, advancing to the next once the audio is done. slideshow will play everything in directory
+// todo   add optional "music" for background since dad wants to put specific music in the background.
+// todo   slideshow will also display metadata that dad has entered such as title and comments etc
+// todo add keyboard shortcut to nautilus extension?
+
 
 /* This function runs once at startup. */
 SDL_AppResult SDL_AppInit(void **appstate, int argc, char *argv[])
@@ -49,9 +55,9 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char *argv[])
     if (argc > 1)
     {
         int len = strlen(argv[1]);
-        if (len > MAX_PATH_LENGTH - 5) // - 5 for ".flac"
+        if (len > MAX_PATH_LENGTH - 11) // -11 for "-audio.flac" suffix
         {
-            len = MAX_PATH_LENGTH - 5;
+            len = MAX_PATH_LENGTH - 11;
         }
         // todo remove old file extension first
         memcpy(filepath, argv[1], len);
@@ -157,7 +163,7 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char *argv[])
 }
 
 /* This function runs when a new event (mouse input, keypresses, etc) occurs. */
-SDL_AppResult SDL_AppEvent(void *appstate, const SDL_Event *event)
+SDL_AppResult SDL_AppEvent(void *appstate, SDL_Event *event)
 {
     if (event->type == SDL_EVENT_QUIT) {
         return SDL_APP_SUCCESS;  /* end the program, reporting success to the OS. */
@@ -313,7 +319,7 @@ int writeAudio(FILE *file, short *data, int length)
 }
 
 /* This function runs once at shutdown. */
-void SDL_AppQuit(void *appstate)
+void SDL_AppQuit(void *appstate, SDL_AppResult result)
 {
     /* SDL will clean up the window/renderer for us. */
 
@@ -338,13 +344,16 @@ void SDL_AppQuit(void *appstate)
     printf("duration: %f", output_buffer_index / 44100.0);
     printf("length: %d", output_buffer_index);
 
+    // todo do not use a hard coded temp file in case multiple recording programs are opened/crashed at once
 
     output_wav = fopen("/tmp/output.wav", "wb");
     writeAudio(output_wav, output_buffer, output_buffer_index);
 
     char command[MAX_PATH_LENGTH + 1000];
 
-    snprintf(command, sizeof(command), "ffmpeg -i /tmp/output.wav -af aformat=s16:41000 -compression_level 12 '%s.flac'", filepath);
+    snprintf(command, sizeof(command), "ffmpeg -i /tmp/output.wav -af aformat=s16:41000 -compression_level 12 '%s-audio.flac'", filepath);
+
+    printf(command);
 
     system(command);
 }
