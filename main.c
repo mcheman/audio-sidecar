@@ -1,22 +1,13 @@
-/*
- * This example code creates an simple audio stream for playing sound, and
- * generates a sine wave sound effect for it to play as time goes on. This
- * is the simplest way to get up and running with procedural sound.
- *
- * This code is public domain. Feel free to use it for any purpose!
- */
+#define SDL_MAIN_USE_CALLBACKS 1
 
-#define SDL_MAIN_USE_CALLBACKS 1  /* use the callbacks instead of main() */
 #include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_main.h>
 
-/* We will use this renderer to draw into this window every frame. */
 static SDL_Window *window = NULL;
 static SDL_Renderer *renderer = NULL;
-static SDL_AudioStream *stream = NULL;
 
 static FILE *output_wav = NULL;
 static short output_buffer[44100 * 60 * 60]; // 1 hour of audio buffer
@@ -43,8 +34,8 @@ static char filepath[MAX_PATH_LENGTH]; // todo check if max len is acceptable
 // todo see if you can get 24bit audio working
 // todo add message when quitting if writing out is taking awhile (though probably not needed if writing out as we go)
 // todo create a slideshow application that plays the audio with the corresponding picture, advancing to the next once the audio is done. slideshow will play everything in directory
-// todo   add optional "music" for background since dad wants to put specific music in the background.
-// todo   slideshow will also display metadata that dad has entered such as title and comments etc
+// todo   add optional "music" for background since he wants to put specific music in the background.
+// todo   slideshow will also display metadata that was entered such as title and comments etc
 // todo add keyboard shortcut to nautilus extension?
 
 
@@ -80,37 +71,17 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char *argv[])
         memcpy(filepath, "/tmp/output", 11);
     }
 
-    SDL_AudioSpec spec;
-
     if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_EVENTS)) {
         SDL_Log("Couldn't initialize SDL! %s", SDL_GetError());
         return SDL_APP_FAILURE;
     }
 
-    /* we don't _need_ a window for audio-only things but it's good policy to have one. */
-    if (!SDL_CreateWindowAndRenderer("examples/audio/simple-playback", 640, 480, 0, &window, &renderer)) {
+    if (!SDL_CreateWindowAndRenderer("Record Audio", 640, 480, 0, &window, &renderer)) {
         SDL_Log("Couldn't create window/renderer! %s", SDL_GetError());
         return SDL_APP_FAILURE;
     }
 
-    /* We're just playing a single thing here, so we'll use the simplified option.
-       We are always going to feed audio in as mono, float32 data at 8000Hz.
-       The stream will convert it to whatever the hardware wants on the other side. */
-    // spec.channels = 1;
-    // spec.format = SDL_AUDIO_F32;
-    // spec.freq = 8000;
-    // stream = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &spec, NULL, NULL);
-    // if (!stream) {
-    //     SDL_Log(SDL_MESSAGEBOX_ERROR, "Couldn't create audio stream!", SDL_GetError(), window);
-    //     return SDL_APP_FAILURE;
-    // }
-    //
-    // /* SDL_OpenAudioDeviceStream starts the device paused. You have to tell it to start! */
-    // SDL_ResumeAudioStreamDevice(stream);
-
     int count;
-
-    printf("sizeof(short): %d\n", (int) sizeof(short));
 
     // todo grab the "Scarlett" interface (case insensitive) and use that for recording. if it's not there display a message about needing to turn it on?
 
@@ -154,63 +125,31 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char *argv[])
     SDL_BindAudioStream(scarlettDevice, scarlettStream);
 
 
-    // SDL_Log("Err: %s", SDL_GetError());
-
-
-
     SDL_free(ids);
     return SDL_APP_CONTINUE;  /* carry on with the program! */
 }
 
-/* This function runs when a new event (mouse input, keypresses, etc) occurs. */
 SDL_AppResult SDL_AppEvent(void *appstate, SDL_Event *event)
 {
     if (event->type == SDL_EVENT_QUIT) {
-        return SDL_APP_SUCCESS;  /* end the program, reporting success to the OS. */
+        return SDL_APP_SUCCESS;
     }
-    return SDL_APP_CONTINUE;  /* carry on with the program! */
+    return SDL_APP_CONTINUE;
 }
 
-/* This function runs once per frame, and is the heart of the program. */
+
 SDL_AppResult SDL_AppIterate(void *appstate)
 {
-    /* see if we need to feed the audio stream more data yet.
-       We're being lazy here, but if there's less than half a second queued, generate more.
-       A sine wave is unchanging audio--easy to stream--but for video games, you'll want
-       to generate significantly _less_ audio ahead of time! */
-    // const int minimum_audio = (8000 * sizeof (float)) / 2;  /* 8000 float samples per second. Half of that. */
-    // if (SDL_GetAudioStreamAvailable(stream) < minimum_audio) {
-    //     static float samples[512];  /* this will feed 512 samples each frame until we get to our maximum. */
-    //     int i;
-    //
-    //     for (i = 0; i < SDL_arraysize(samples); i++) {
-    //         /* You don't have to care about this math; we're just generating a simple sine wave as we go.
-    //            https://en.wikipedia.org/wiki/Sine_wave */
-    //         const float time = total_samples_generated / 8000.0f;
-    //         const int sine_freq = 500;   /* run the wave at 500Hz */
-    //         samples[i] = SDL_sinf(6.283185f * sine_freq * time);
-    //         total_samples_generated++;
-    //     }
-    //
-    //     /* feed the new data to the stream. It will queue at the end, and trickle out as the hardware needs more data. */
-    //     SDL_PutAudioStreamData(stream, samples, sizeof (samples));
-    // }
-    //
-
-    /* we're not doing anything with the renderer, so just blank it out. */
     SDL_FRect rect;
 
-    /* as you can see from this, rendering draws over whatever was drawn before it. */
-    SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);  /* black, full alpha */
-    SDL_RenderClear(renderer);  /* start with a blank canvas. */
+    SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
+    SDL_RenderClear(renderer);
 
-    /* draw a filled rectangle in the middle of the canvas. */
-    SDL_SetRenderDrawColor(renderer, 0, 0, 255, 255);  /* blue, full alpha */
+    SDL_SetRenderDrawColor(renderer, 0, 0, 255, 255);
     rect.x = rect.y = 100;
     rect.w = 440;
     rect.h = 300;
     SDL_RenderFillRect(renderer, &rect);
-
 
 
     short data[44100] = {0};
@@ -225,14 +164,6 @@ SDL_AppResult SDL_AppIterate(void *appstate)
             output_buffer_index++;
         }
     }
-
-
-
-
-        // amplitude = (average * 300) /2500;
-        // amplitude = (max * 300) / (SHRT_MAX / 2);
-
-        // SDL_Log("%d", average);
 
 
     SDL_SetRenderDrawColor(renderer, 255, 150, 255, 255);  /* blue, full alpha */
@@ -262,12 +193,12 @@ SDL_AppResult SDL_AppIterate(void *appstate)
 
 
     SDL_RenderPresent(renderer);
-    return SDL_APP_CONTINUE;  /* carry on with the program! */
+    return SDL_APP_CONTINUE;
 }
 
 
 // see https://en.wikipedia.org/wiki/WAV
-struct WAV_HEADER // little endian
+struct WAV_HEADER
 {
     char FileTypeBlockID[4];
     uint32_t FileSize;
@@ -318,11 +249,8 @@ int writeAudio(FILE *file, short *data, int length)
     fclose(file);
 }
 
-/* This function runs once at shutdown. */
 void SDL_AppQuit(void *appstate, SDL_AppResult result)
 {
-    /* SDL will clean up the window/renderer for us. */
-
     SDL_FlushAudioStream(scarlettStream);
 
     int bytesRead = 0;
@@ -351,7 +279,7 @@ void SDL_AppQuit(void *appstate, SDL_AppResult result)
 
     char command[MAX_PATH_LENGTH + 1000];
 
-    snprintf(command, sizeof(command), "ffmpeg -i /tmp/output.wav -af aformat=s16:41000 -compression_level 12 '%s-audio.flac'", filepath);
+    snprintf(command, sizeof(command), "ffmpeg -y -i /tmp/output.wav -af aformat=s16:41000 -compression_level 12 '%s-audio.flac'", filepath);
 
     printf(command);
 
