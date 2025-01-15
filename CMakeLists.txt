@@ -11,7 +11,7 @@ set(SDL_STATIC TRUE CACHE BOOL "Build a SDL static library (if available)")
 FetchContent_Declare(
         SDL
         GIT_REPOSITORY https://github.com/libsdl-org/SDL.git
-        GIT_TAG main  # Replace this with a particular git tag or git hash
+        GIT_TAG main  # todo Replace this with a particular git tag or git hash. Better todo, replace with system sdl once 3 is generally available
         GIT_SHALLOW TRUE
         GIT_PROGRESS TRUE
 )

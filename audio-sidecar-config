@@ -1,0 +1,32 @@
+# Configuration for audio-sidecar
+
+# Search for the audio interface that contains this text and use it for recording.
+# If not available, it will fall back to the default sound device.
+Interface hdmi
+
+# Enable auto record when program is launched
+#     AutoRecord = on | off
+AutoRecord off
+
+# Specify how to deal with a file that already has an audio sidecar
+#     ExistingFileStrategy rename-to-last | rename-to-first | replace | append | ask
+#        rename-to-last: add a suffix to the latest audio to ensure it gets sorted last
+#        rename-to-first: rename all other audio sidecars so they are out of the way and the latest audio's filename will exactly match the source file
+#        replace: silently overwrite the existing sidecar (todo possibly move the existing sidecar to a trash directory or rename it with its date and then put it in the system trash)
+#        append: record audio onto the end of the existing sidecar
+#        ask: prompt the user for the behavior they want
+#
+ExistingFileStrategy replace
+
+# Specify the size of the window. All elements are scaled appropriately.
+# WindowSize <width>x<height>
+#
+WindowSize = 800x600
+
+# Path to the log file to use
+#
+LogPath ./log
+
+# LogLevel debug | info | error
+#
+LogLevel debug

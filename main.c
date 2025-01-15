@@ -38,10 +38,25 @@ static char filepath[MAX_PATH_LENGTH]; // todo check if max len is acceptable
 // todo   slideshow will also display metadata that was entered such as title and comments etc
 // todo add keyboard shortcut to nautilus extension?
 
+// todo periodically check if new audio devices have been added (especially if none of the ideal ones are detected yet), see getaudiorecordingdevices or eventing
+// todo assign flac album cover art to image it was created for with extra audio icon????
+
+// todo load values from config file: interface text to search for,
+
+struct ProgramConfig
+{
+    char* interface;
+} config;
+
+int loadConfig(char* filename);
+
+
 
 /* This function runs once at startup. */
 SDL_AppResult SDL_AppInit(void **appstate, int argc, char *argv[])
 {
+
+    loadConfig("audio-sidecar-config");
 
     if (argc > 1)
     {
@@ -83,7 +98,7 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char *argv[])
 
     int count;
 
-    // todo grab the "Scarlett" interface (case insensitive) and use that for recording. if it's not there display a message about needing to turn it on?
+
 
     SDL_AudioDeviceID* ids = SDL_GetAudioRecordingDevices(&count);
     SDL_Log("Count: %d" ,count);
@@ -92,15 +107,31 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char *argv[])
         SDL_Log("No recording devices found!", SDL_GetError());
     }
 
+    SDL_AudioDeviceID physicalScarlett = 0;
+
     for (int i = 0; i < count; i++)
     {
         const char* name = SDL_GetAudioDeviceName(ids[i]);
 
         SDL_Log("device[%d] name: %s", i, name);
+
+        if (strcasestr(name, config.interface) != NULL)
+        {
+            // todo try to select the first input, or test both inputs to see which has any audio signal and use that one
+            SDL_Log("FOUND SCARLETT: device[%d] name: %s ", i, name);
+            physicalScarlett = ids[i];
+        }
+
+
     }
 
-    SDL_AudioDeviceID physicalScarlett = ids[0];
+    if (physicalScarlett == 0)
+    {
+        // todo display a user facing message about needing to turn it on
+        SDL_Log("Couldn't find scarlett!", SDL_GetError());
+    }
 
+    // todo replace "scarlett" naming convention with generic name and put "scarlett" as a string for the preferred audio interface
 
     // scarlett is the opened logical device that points at the physical scarlett device
     SDL_AudioDeviceID scarlettDevice = SDL_OpenAudioDevice(physicalScarlett, NULL);
@@ -194,6 +225,80 @@ SDL_AppResult SDL_AppIterate(void *appstate)
 
     SDL_RenderPresent(renderer);
     return SDL_APP_CONTINUE;
+}
+
+int loadConfig(char* filename)
+{
+    // todo use sdl async io api
+    SDL_Storage *readStorage = SDL_OpenTitleStorage("/speed/programs/audio-sidecar/", 0);
+    if (readStorage == NULL) {
+        SDL_Log("Couldn't open sdl read only storage! %s", SDL_GetError());
+    }
+    while (!SDL_StorageReady(readStorage)) {
+        SDL_Delay(1);
+    }
+
+
+    Uint64 dstLen = 0;
+
+    if (SDL_GetStorageFileSize(readStorage, filename, &dstLen) && dstLen > 0) {
+        char* dst = SDL_malloc(dstLen);
+        if (!SDL_ReadStorageFile(readStorage, filename, dst, dstLen)) {
+            SDL_Log("Couldn't read %s: %s", filename, SDL_GetError());
+        }
+
+        // parse config file into struct
+        // for (Uint64 i = 0; i < dstLen; i++)
+        // {
+        //     if (dst[i] == '#')
+        //     {
+        //         // It's a comment line, skip to end
+        //         while (i < dstLen && dst[++i] != '\n');
+        //     }
+        //
+        //     if (dst[i])
+        // }
+
+        char* line = strtok(dst, "\n");
+        while (line != NULL)
+        {
+            if (line[0] == '#')
+            {
+                // comment line, ignore
+            }
+            else if (strncmp(line, "Interface", sizeof("Interface") - 1) == 0)
+            {
+                // todo better handle whitespace instead of expecting exactly one character's space between the key and the value
+                // todo also do error checking for things like "interface\n" and valid values
+                char* value = line + sizeof("Interface ");
+
+                config.interface = malloc(strlen(value)); // intentionally not free'd since config has static lifetime
+                if (config.interface == NULL)
+                {
+                    SDL_Log("Couldn't allocate memory for Interface");
+                    return 1;
+                }
+                strcpy(config.interface, value);
+            }
+
+            line = strtok(NULL, "\n"); // get next token
+        }
+
+
+
+
+        SDL_free(dst);
+    } else {
+        SDL_Log("Couldn't find file to get size %s: %s", filename, SDL_GetError());
+    }
+
+    SDL_CloseStorage(readStorage);
+    return 0;
+}
+
+char* getConfigValue(char* line, char* key)
+{
+
 }
 
 
