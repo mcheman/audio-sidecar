@@ -1,6 +1,6 @@
 extern crate sdl3_sys;
 
-use std::ffi::{c_float, c_int, CString};
+use std::ffi::{c_float, c_int, CStr, CString};
 use std::mem::zeroed;
 use std::process::exit;
 use std::ptr;
@@ -35,9 +35,8 @@ pub fn main() {
 
     unsafe {
         let mut num_devices = 0;
-        let mut devices;
 
-        devices = SDL_GetAudioRecordingDevices(&mut num_devices); // free'd below
+        let devices = SDL_GetAudioRecordingDevices(&mut num_devices); // free'd below
         if devices.is_null() || num_devices == 0 {
             SDL_Log(c"No recording devices found!".as_ptr(), SDL_GetError());
             SDL_Quit();
@@ -50,8 +49,7 @@ pub fn main() {
         println!("Found {} Audio Devices:", num_devices);
         for i in 0..num_devices {
             let deviceid = devices.offset(i as isize);
-            let name = CString::from_raw(SDL_GetAudioDeviceName(*deviceid).cast_mut());
-            let name = name.to_string_lossy().to_string();
+            let name = CStr::from_ptr(SDL_GetAudioDeviceName(*deviceid)).to_string_lossy().to_string();
             if name.to_lowercase().contains("scarlett") {
                 println!("\t{} <<<<<<<<<<<<<<< MATCH FOUND <<<<<", name);
                 desired_interface_id = *devices.offset(i as isize);
@@ -83,7 +81,7 @@ pub fn main() {
 
         loop {
             let mut event: SDL_Event = zeroed();
-            while (SDL_PollEvent(&mut event)) {  // poll until all events are handled!
+            while SDL_PollEvent(&mut event) {  // poll until all events are handled!
                 // decide what to do with this event.
                 match SDL_EventType(event.r#type) {
                     SDL_EventType::QUIT => {
