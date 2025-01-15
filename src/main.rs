@@ -1,10 +1,11 @@
 extern crate sdl3_sys;
 
-use std::ffi::{c_float, c_int, CStr, CString};
+use std::ffi::{c_float, c_int, CStr};
 use std::mem::zeroed;
 use std::process::exit;
 use std::ptr;
 use std::time::Duration;
+use config::{Config, FileFormat};
 use sdl3_sys::everything::*;
 
 // todo wrap sdl code in safe crate and hide these variables within, ideally within some created struct
@@ -20,15 +21,21 @@ pub fn main() {
     // let c = a.to_str().unwrap();
     // let d = a.into_string().unwrap();
 
+    let settings = Config::builder()
+        .add_source(config::File::new("audio-sidecar-config", FileFormat::Toml))
+        .build()
+        .unwrap();
+
+    let interface: String = settings.get("Interface").unwrap();
+    let window_width: u32 = settings.get("WindowWidth").unwrap();
+    let window_height: u32 = settings.get("WindowHeight").unwrap();
 
 
     unsafe {
         SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_EVENTS);
 
-        SDL_CreateWindowAndRenderer(c"Record Audio".as_ptr(), 640, 480, 0, &raw mut window, &raw mut renderer);
-
-        SDL_RenderClear(renderer);
-        SDL_RenderPresent(renderer);
+        let window_flags = SDL_WINDOW_RESIZABLE;
+        SDL_CreateWindowAndRenderer(c"Record Audio".as_ptr(), window_width as c_int, window_height as c_int, window_flags, &raw mut window, &raw mut renderer);
     }
 
 
@@ -50,7 +57,7 @@ pub fn main() {
         for i in 0..num_devices {
             let deviceid = devices.offset(i as isize);
             let name = CStr::from_ptr(SDL_GetAudioDeviceName(*deviceid)).to_string_lossy().to_string();
-            if name.to_lowercase().contains("scarlett") {
+            if name.to_lowercase().contains(interface.as_str()) {
                 println!("\t{} <<<<<<<<<<<<<<< MATCH FOUND <<<<<", name);
                 desired_interface_id = *devices.offset(i as isize);
             } else {
@@ -77,7 +84,6 @@ pub fn main() {
         let audio_stream = SDL_CreateAudioStream(&src_spec, &dest_spec);
 
         SDL_BindAudioStream(logical_interface_id, audio_stream);
-
 
         loop {
             let mut event: SDL_Event = zeroed();

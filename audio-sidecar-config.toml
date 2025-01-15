@@ -2,11 +2,11 @@
 
 # Search for the audio interface that contains this text and use it for recording.
 # If not available, it will fall back to the default sound device.
-Interface hdmi
+Interface = "input 1"
 
 # Enable auto record when program is launched
 #     AutoRecord = on | off
-AutoRecord off
+AutoRecord = "off"
 
 # Specify how to deal with a file that already has an audio sidecar
 #     ExistingFileStrategy rename-to-last | rename-to-first | replace | append | ask
@@ -16,17 +16,18 @@ AutoRecord off
 #        append: record audio onto the end of the existing sidecar
 #        ask: prompt the user for the behavior they want
 #
-ExistingFileStrategy replace
+ExistingFileStrategy = "replace"
 
 # Specify the size of the window. All elements are scaled appropriately.
 # WindowSize <width>x<height>
 #
-WindowSize = 800x600
+WindowWidth = 800
+WindowHeight = 400
 
 # Path to the log file to use
 #
-LogPath ./log
+LogPath = "./log"
 
 # LogLevel debug | info | error
 #
-LogLevel debug
+LogLevel = "debug"
