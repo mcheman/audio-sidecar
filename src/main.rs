@@ -1,6 +1,6 @@
 extern crate sdl3_sys;
 
-use std::ffi::{c_float, c_int, CStr};
+use std::ffi::{c_float, c_int};
 use std::mem::zeroed;
 use std::process::exit;
 use std::time::Duration;
@@ -96,10 +96,11 @@ pub fn main() {
                     _ => continue
                 }
             }
-
-            let mut samples = [0i32; 44100/30];
-
-            let bytes_read = SDL_GetAudioStreamData(audio_stream, samples.as_mut_ptr().cast(), (samples.len() * 2) as c_int);
+            
+            let samples = match sdl::get_audio_stream_data_i32(audio_stream) {
+                Ok(s) => s,
+                Err(msg) => die(format!("SDL GetAudioStreamData failed: {}", msg).as_str())
+            };
 
             let mut max = 0;
             for s in samples {

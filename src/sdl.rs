@@ -1,7 +1,7 @@
-use crate::die;
 use sdl3_sys::everything::*;
 use sdl3_sys::init::SDL_InitFlags;
-use std::ffi::{CStr, CString};
+use std::cmp::min;
+use std::ffi::{c_int, CStr, CString};
 use std::ptr;
 // todo wrap sdl code in safe crate and hide these variables within, ideally within some created struct
 
@@ -59,6 +59,7 @@ pub fn create_window_and_renderer(
     }
 }
 
+// todo make into trait with gfx as self?
 pub fn set_render_draw_color(gfx: &Gfx, color: SDL_Color) -> Result<(), String> {
     unsafe {
         if SDL_SetRenderDrawColor(gfx.renderer, color.r, color.g, color.b, color.a) {
@@ -107,9 +108,7 @@ pub struct AudioDevice {
 pub fn get_audio_recording_devices() -> Result<Vec<AudioDevice>, String> {
     let mut num_devices = 0;
 
-    let devices: *mut SDL_AudioDeviceID = unsafe {
-        SDL_GetAudioRecordingDevices(&mut num_devices)
-    };
+    let devices: *mut SDL_AudioDeviceID = unsafe { SDL_GetAudioRecordingDevices(&mut num_devices) };
 
     if devices.is_null() || num_devices == 0 {
         Err(format!("No recording devices found: {}", get_error()))
@@ -118,7 +117,8 @@ pub fn get_audio_recording_devices() -> Result<Vec<AudioDevice>, String> {
 
         for i in 0..num_devices {
             let device_id = unsafe { *(devices.offset(i as isize)) };
-            let name = unsafe { CStr::from_ptr(SDL_GetAudioDeviceName(device_id)).to_string_lossy() };
+            let name =
+                unsafe { CStr::from_ptr(SDL_GetAudioDeviceName(device_id)).to_string_lossy() };
 
             audio_devices.push(AudioDevice {
                 id: device_id,
@@ -132,4 +132,33 @@ pub fn get_audio_recording_devices() -> Result<Vec<AudioDevice>, String> {
 
         Ok(audio_devices)
     }
+}
+
+// get all samples of pending audio
+// todo enforce audio is in i32 format when calling this function
+pub fn get_audio_stream_data_i32(stream: *mut SDL_AudioStream) -> Result<Vec<i32>, String> {
+    let mut samples = Vec::with_capacity(1024);
+
+    let mut sample_buffer = [0i32; 1024];
+    let buffer_bytes = (sample_buffer.len() * 4) as c_int;
+
+    loop {
+        let bytes_read = unsafe {
+            SDL_GetAudioStreamData(stream, sample_buffer.as_mut_ptr().cast(), buffer_bytes)
+        };
+
+        if bytes_read == -1 {
+            return Err(get_error()); // todo we probably want to handle this better since this could maybe interrupt an in progress recording, say if the audio device got disconnected?
+        } else if bytes_read == 0 {
+            break;
+        }
+
+        let samples_read = (bytes_read / 4) as usize;
+
+        for i in 0..(min(sample_buffer.len(), samples_read)) {
+            samples.push(sample_buffer[i]);
+        }
+    }
+
+    Ok(samples)
 }
