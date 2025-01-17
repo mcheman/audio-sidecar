@@ -3,24 +3,28 @@ extern crate sdl3_sys;
 use std::ffi::{c_float, c_int, CStr};
 use std::mem::zeroed;
 use std::process::exit;
-use std::ptr;
 use std::time::Duration;
 use config::{Config, FileFormat};
 use sdl3_sys::everything::*;
 
-// todo wrap sdl code in safe crate and hide these variables within, ideally within some created struct
-static mut window: *mut SDL_Window = ptr::null_mut();
-static mut renderer: *mut SDL_Renderer = ptr::null_mut();
+mod sdl;
+
+fn die(s: &str) -> ! {
+    println!("{}", s);
+    sdl::quit();
+    panic!();
+}
+
+fn or_die(result: Result<(), String>) {
+    if let Err(msg) = result {
+        die(format!("SDL Something weird happened because a function that should not have failed has failed: {}", msg).as_str());
+    }
+}
 
 
 // todo copious error checking
 
 pub fn main() {
-    // let a = CString::new(String::from("test")).unwrap();
-    // let b = a.as_c_str().to_str().unwrap();
-    // let c = a.to_str().unwrap();
-    // let d = a.into_string().unwrap();
-
     let settings = Config::builder()
         .add_source(config::File::new("audio-sidecar-config", FileFormat::Toml))
         .build()
@@ -31,12 +35,16 @@ pub fn main() {
     let window_height: u32 = settings.get("WindowHeight").unwrap();
 
 
-    unsafe {
-        SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_EVENTS);
-
-        let window_flags = SDL_WINDOW_RESIZABLE;
-        SDL_CreateWindowAndRenderer(c"Record Audio".as_ptr(), window_width as c_int, window_height as c_int, window_flags, &raw mut window, &raw mut renderer);
+    if let Err(msg) = sdl::init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_EVENTS) {
+        die(format!("SDL initialization failed: {}", msg).as_str());
     }
+
+
+    let result = sdl::create_window_and_renderer("Record Audio", window_width, window_height, SDL_WINDOW_RESIZABLE);
+    if let Err(msg) = result {
+        die(format!("SDL window creation failed: {}", msg).as_str());
+    }
+    let mut gfx = result.unwrap();
 
 
 
@@ -111,9 +119,9 @@ pub fn main() {
                 }
             }
 
-            SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
-            SDL_RenderClear(renderer);
-            SDL_SetRenderDrawColor(renderer, 255, 150, 255, 255);
+            or_die(sdl::set_render_draw_color(&mut gfx, SDL_Color{r: 0, g: 0, b: 0, a: 255}));
+            or_die(sdl::render_clear(&mut gfx));
+            or_die(sdl::set_render_draw_color(&mut gfx, SDL_Color{r: 255, g: 150, b: 255, a: 255}));
 
 
             let rect = SDL_FRect {
@@ -123,9 +131,10 @@ pub fn main() {
                 y: 0.0,
             };
 
-            SDL_RenderFillRect(renderer, &rect);
+            or_die(sdl::render_fill_rect(&mut gfx, &rect));
 
-            SDL_RenderPresent(renderer);
+            or_die(sdl::render_present(&mut gfx));
+
             ::std::thread::sleep(Duration::new(0, 1_000_000_000u32 / 120));
         }
     }
