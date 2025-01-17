@@ -1,8 +1,8 @@
+use crate::die;
 use sdl3_sys::everything::*;
 use sdl3_sys::init::SDL_InitFlags;
 use std::ffi::{CStr, CString};
 use std::ptr;
-
 // todo wrap sdl code in safe crate and hide these variables within, ideally within some created struct
 
 pub struct Gfx {
@@ -25,7 +25,9 @@ pub fn init(flags: SDL_InitFlags) -> Result<(), String> {
 }
 
 pub fn quit() {
-    unsafe {SDL_Quit();}
+    unsafe {
+        SDL_Quit();
+    }
 }
 
 pub fn create_window_and_renderer(
@@ -34,8 +36,10 @@ pub fn create_window_and_renderer(
     height: u32,
     window_flags: SDL_WindowFlags,
 ) -> Result<Gfx, String> {
-    let mut window: *mut SDL_Window = ptr::null_mut();
-    let mut renderer: *mut SDL_Renderer = ptr::null_mut();
+    let mut gfx = Gfx {
+        window: ptr::null_mut(),
+        renderer: ptr::null_mut(),
+    };
 
     if unsafe {
         SDL_CreateWindowAndRenderer(
@@ -45,17 +49,17 @@ pub fn create_window_and_renderer(
             width as i32,
             height as i32,
             window_flags,
-            &raw mut window,
-            &raw mut renderer,
+            &raw mut gfx.window,
+            &raw mut gfx.renderer,
         )
     } {
-        Ok(Gfx { window, renderer })
+        Ok(gfx)
     } else {
         Err(get_error())
     }
 }
 
-pub fn set_render_draw_color(gfx: &mut Gfx, color: SDL_Color) -> Result<(), String> {
+pub fn set_render_draw_color(gfx: &Gfx, color: SDL_Color) -> Result<(), String> {
     unsafe {
         if SDL_SetRenderDrawColor(gfx.renderer, color.r, color.g, color.b, color.a) {
             Ok(())
@@ -65,7 +69,7 @@ pub fn set_render_draw_color(gfx: &mut Gfx, color: SDL_Color) -> Result<(), Stri
     }
 }
 
-pub fn render_clear(gfx: &mut Gfx) -> Result<(), String> {
+pub fn render_clear(gfx: &Gfx) -> Result<(), String> {
     unsafe {
         if SDL_RenderClear(gfx.renderer) {
             Ok(())
@@ -75,7 +79,7 @@ pub fn render_clear(gfx: &mut Gfx) -> Result<(), String> {
     }
 }
 
-pub fn render_fill_rect(gfx: &mut Gfx, rect: &SDL_FRect) -> Result<(), String> {
+pub fn render_fill_rect(gfx: &Gfx, rect: &SDL_FRect) -> Result<(), String> {
     unsafe {
         if SDL_RenderFillRect(gfx.renderer, rect) {
             Ok(())
@@ -85,8 +89,7 @@ pub fn render_fill_rect(gfx: &mut Gfx, rect: &SDL_FRect) -> Result<(), String> {
     }
 }
 
-
-pub fn render_present(gfx: &mut Gfx) -> Result<(), String> {
+pub fn render_present(gfx: &Gfx) -> Result<(), String> {
     unsafe {
         if SDL_RenderPresent(gfx.renderer) {
             Ok(())
@@ -96,3 +99,37 @@ pub fn render_present(gfx: &mut Gfx) -> Result<(), String> {
     }
 }
 
+pub struct AudioDevice {
+    pub id: SDL_AudioDeviceID,
+    pub name: String,
+}
+
+pub fn get_audio_recording_devices() -> Result<Vec<AudioDevice>, String> {
+    let mut num_devices = 0;
+
+    let devices: *mut SDL_AudioDeviceID = unsafe {
+        SDL_GetAudioRecordingDevices(&mut num_devices)
+    };
+
+    if devices.is_null() || num_devices == 0 {
+        Err(format!("No recording devices found: {}", get_error()))
+    } else {
+        let mut audio_devices = Vec::with_capacity(num_devices as usize);
+
+        for i in 0..num_devices {
+            let device_id = unsafe { *(devices.offset(i as isize)) };
+            let name = unsafe { CStr::from_ptr(SDL_GetAudioDeviceName(device_id)).to_string_lossy() };
+
+            audio_devices.push(AudioDevice {
+                id: device_id,
+                name: name.to_string(),
+            });
+        }
+
+        unsafe {
+            SDL_free(devices.cast());
+        }
+
+        Ok(audio_devices)
+    }
+}

@@ -39,54 +39,43 @@ pub fn main() {
         die(format!("SDL initialization failed: {}", msg).as_str());
     }
 
+    let gfx = match sdl::create_window_and_renderer("Record Audio", window_width, window_height, SDL_WINDOW_RESIZABLE) {
+        Ok(gfx) => gfx,
+        Err(msg) => die(format!("SDL window creation failed: {}", msg).as_str())
+    };
 
-    let result = sdl::create_window_and_renderer("Record Audio", window_width, window_height, SDL_WINDOW_RESIZABLE);
-    if let Err(msg) = result {
-        die(format!("SDL window creation failed: {}", msg).as_str());
+    let recording_devices = match sdl::get_audio_recording_devices() {
+        Ok(a) => a,
+        Err(msg) => die(format!("SDL finding audio recording devices failed: {}", msg).as_str())
+    };
+
+    let mut desired_interface_id = SDL_AUDIO_DEVICE_DEFAULT_RECORDING;
+
+    println!("Found {} Audio Devices:", recording_devices.len());
+    for device in recording_devices {
+        let found = if device.name.to_lowercase().contains(interface.as_str()) {
+            desired_interface_id = device.id;
+            " <<<< MATCH FOUND <<<<"
+        } else {
+            ""
+        };
+
+        println!("\t{} {}", device.name, found);
     }
-    let mut gfx = result.unwrap();
 
+    let src_spec = SDL_AudioSpec{
+        channels: 1,
+        freq: 44100,
+        format: SDL_AudioFormat::S32
+    };
 
+    let dest_spec = SDL_AudioSpec{
+        channels: 1,
+        freq: 44100,
+        format: SDL_AudioFormat::S32 // todo can I simply truncate 32 bit samples to 24 bit for the flac encoder?
+    };
 
     unsafe {
-        let mut num_devices = 0;
-
-        let devices = SDL_GetAudioRecordingDevices(&mut num_devices); // free'd below
-        if devices.is_null() || num_devices == 0 {
-            SDL_Log(c"No recording devices found!".as_ptr(), SDL_GetError());
-            SDL_Quit();
-            exit(1);
-        }
-
-
-        let mut desired_interface_id = SDL_AUDIO_DEVICE_DEFAULT_RECORDING;
-
-        println!("Found {} Audio Devices:", num_devices);
-        for i in 0..num_devices {
-            let deviceid = devices.offset(i as isize);
-            let name = CStr::from_ptr(SDL_GetAudioDeviceName(*deviceid)).to_string_lossy().to_string();
-            if name.to_lowercase().contains(interface.as_str()) {
-                println!("\t{} <<<<<<<<<<<<<<< MATCH FOUND <<<<<", name);
-                desired_interface_id = *devices.offset(i as isize);
-            } else {
-                println!("\t{}", name);
-            }
-        }
-
-        SDL_free(devices.cast());
-
-        let src_spec = SDL_AudioSpec{
-            channels: 1,
-            freq: 44100,
-            format: SDL_AudioFormat::S32
-        };
-
-        let dest_spec = SDL_AudioSpec{
-            channels: 1,
-            freq: 44100,
-            format: SDL_AudioFormat::S32 // todo can I simply truncate 32 bit samples to 24 bit for the flac encoder?
-        };
-
         let logical_interface_id = SDL_OpenAudioDevice(desired_interface_id, &src_spec);
 
         let audio_stream = SDL_CreateAudioStream(&src_spec, &dest_spec);
@@ -119,9 +108,9 @@ pub fn main() {
                 }
             }
 
-            or_die(sdl::set_render_draw_color(&mut gfx, SDL_Color{r: 0, g: 0, b: 0, a: 255}));
-            or_die(sdl::render_clear(&mut gfx));
-            or_die(sdl::set_render_draw_color(&mut gfx, SDL_Color{r: 255, g: 150, b: 255, a: 255}));
+            or_die(sdl::set_render_draw_color(&gfx, SDL_Color{r: 0, g: 0, b: 0, a: 255}));
+            or_die(sdl::render_clear(&gfx));
+            or_die(sdl::set_render_draw_color(&gfx, SDL_Color{r: 255, g: 150, b: 255, a: 255}));
 
 
             let rect = SDL_FRect {
@@ -131,9 +120,9 @@ pub fn main() {
                 y: 0.0,
             };
 
-            or_die(sdl::render_fill_rect(&mut gfx, &rect));
+            or_die(sdl::render_fill_rect(&gfx, &rect));
 
-            or_die(sdl::render_present(&mut gfx));
+            or_die(sdl::render_present(&gfx));
 
             ::std::thread::sleep(Duration::new(0, 1_000_000_000u32 / 120));
         }
