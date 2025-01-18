@@ -3,7 +3,12 @@ use sdl3_sys::init::SDL_InitFlags;
 use std::cmp::min;
 use std::ffi::{c_int, CStr, CString};
 use std::ptr;
-// todo wrap sdl code in safe crate and hide these variables within, ideally within some created struct
+
+const AUDIO_SPEC: SDL_AudioSpec = SDL_AudioSpec {
+    channels: 1,
+    freq: 44100,
+    format: SDL_AudioFormat::S32, // todo can I simply truncate 32 bit samples to 24 bit for the flac encoder?
+};
 
 pub struct Gfx {
     window: *mut SDL_Window,
@@ -133,6 +138,37 @@ pub fn get_audio_recording_devices() -> Result<Vec<AudioDevice>, String> {
         Ok(audio_devices)
     }
 }
+
+pub fn open_audio_device(id: SDL_AudioDeviceID) -> Result<SDL_AudioDeviceID, String> {
+    let logical_interface_id = unsafe { SDL_OpenAudioDevice(id, &AUDIO_SPEC) };
+
+    if logical_interface_id != 0 {
+        Ok(logical_interface_id)
+    } else {
+        Err(get_error())
+    }
+}
+
+pub fn create_audio_stream() -> Result<*mut SDL_AudioStream, String> {
+    let audio_steam = unsafe { SDL_CreateAudioStream(&AUDIO_SPEC, &AUDIO_SPEC) };
+
+    if audio_steam.is_null() {
+        Err(get_error())
+    } else {
+        Ok(audio_steam)
+    }
+}
+
+pub fn bind_audio_stream(id: SDL_AudioDeviceID, stream: *mut SDL_AudioStream) -> Result<(), String> {
+    unsafe {
+        if SDL_BindAudioStream(id, stream) {
+            Ok(())
+        } else {
+            Err(get_error())
+        }
+    }
+}
+
 
 // get all samples of pending audio
 // todo enforce audio is in i32 format when calling this function
