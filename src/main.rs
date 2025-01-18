@@ -1,11 +1,11 @@
 extern crate sdl3_sys;
 
+use std::ffi::c_float;
 use config::{Config, FileFormat};
 use sdl3_sys::everything::*;
-use std::ffi::c_float;
-use std::mem::zeroed;
 use std::process::exit;
 use std::time::Duration;
+use crate::sdl::Event;
 
 mod sdl;
 
@@ -91,67 +91,66 @@ pub fn main() {
         die(format!("SDL could not bind logical audio device to stream: {}", msg).as_str());
     }
 
-    unsafe {
-        loop {
-            let mut event: SDL_Event = zeroed();
-            while SDL_PollEvent(&mut event) {
-                // poll until all events are handled!
-                // decide what to do with this event.
-                match SDL_EventType(event.r#type) {
-                    SDL_EventType::QUIT => {
-                        SDL_FlushAudioStream(audio_stream);
-                        SDL_CloseAudioDevice(logical_interface_id);
-                        sdl::quit();
-                        exit(0);
+    loop {
+        // poll until all events are handled and the queue runs dry
+        while let Some(event) = sdl::poll_event() {
+            match event {
+                // todo New events will have to be added both here and in sdl::poll_event()
+                Event::Quit(_) => {
+                    if let Err(msg) = sdl::flush_audio_stream(audio_stream) {
+                        die(format!("SDL could not flush audio stream: {}", msg).as_str());
                     }
-                    _ => continue,
+                    sdl::close_audio_device(logical_interface_id);
+                    sdl::quit();
+                    exit(0);
                 }
+                _ => continue,
             }
-
-            let samples = match sdl::get_audio_stream_data_i32(audio_stream) {
-                Ok(s) => s,
-                Err(msg) => die(format!("SDL GetAudioStreamData failed: {}", msg).as_str()),
-            };
-
-            let mut max = 0;
-            for s in samples {
-                if s > max {
-                    max = s;
-                }
-            }
-
-            or_die(sdl::set_render_draw_color(
-                &gfx,
-                SDL_Color {
-                    r: 0,
-                    g: 0,
-                    b: 0,
-                    a: 255,
-                },
-            ));
-            or_die(sdl::render_clear(&gfx));
-            or_die(sdl::set_render_draw_color(
-                &gfx,
-                SDL_Color {
-                    r: 255,
-                    g: 150,
-                    b: 255,
-                    a: 255,
-                },
-            ));
-
-            let rect = SDL_FRect {
-                h: (max as f64 * (480.0 / i32::MAX as f64)) as c_float,
-                w: 100.0,
-                x: 0.0,
-                y: 0.0,
-            };
-
-            or_die(sdl::render_fill_rect(&gfx, &rect));
-
-            or_die(sdl::render_present(&gfx));
-
-            ::std::thread::sleep(Duration::new(0, 1_000_000_000u32 / 120));
         }
+
+        let samples = match sdl::get_audio_stream_data_i32(audio_stream) {
+            Ok(s) => s,
+            Err(msg) => die(format!("SDL GetAudioStreamData failed: {}", msg).as_str()),
+        };
+
+        let mut max = 0;
+        for s in samples {
+            if s > max {
+                max = s;
+            }
+        }
+
+        or_die(sdl::set_render_draw_color(
+            &gfx,
+            SDL_Color {
+                r: 0,
+                g: 0,
+                b: 0,
+                a: 255,
+            },
+        ));
+        or_die(sdl::render_clear(&gfx));
+        or_die(sdl::set_render_draw_color(
+            &gfx,
+            SDL_Color {
+                r: 255,
+                g: 150,
+                b: 255,
+                a: 255,
+            },
+        ));
+
+        let rect = SDL_FRect {
+            h: (max as f64 * (480.0 / i32::MAX as f64)) as c_float,
+            w: 100.0,
+            x: 0.0,
+            y: 0.0,
+        };
+
+        or_die(sdl::render_fill_rect(&gfx, &rect));
+
+        or_die(sdl::render_present(&gfx));
+
+        ::std::thread::sleep(Duration::new(0, 1_000_000_000u32 / 120));
     }
 }

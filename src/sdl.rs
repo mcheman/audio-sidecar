@@ -20,12 +20,10 @@ fn get_error() -> String {
 }
 
 pub fn init(flags: SDL_InitFlags) -> Result<(), String> {
-    unsafe {
-        if SDL_Init(flags) {
-            Ok(())
-        } else {
-            Err(get_error())
-        }
+    if unsafe { SDL_Init(flags) } {
+        Ok(())
+    } else {
+        Err(get_error())
     }
 }
 
@@ -66,42 +64,34 @@ pub fn create_window_and_renderer(
 
 // todo make into trait with gfx as self?
 pub fn set_render_draw_color(gfx: &Gfx, color: SDL_Color) -> Result<(), String> {
-    unsafe {
-        if SDL_SetRenderDrawColor(gfx.renderer, color.r, color.g, color.b, color.a) {
-            Ok(())
-        } else {
-            Err(get_error())
-        }
+    if unsafe { SDL_SetRenderDrawColor(gfx.renderer, color.r, color.g, color.b, color.a) } {
+        Ok(())
+    } else {
+        Err(get_error())
     }
 }
 
 pub fn render_clear(gfx: &Gfx) -> Result<(), String> {
-    unsafe {
-        if SDL_RenderClear(gfx.renderer) {
-            Ok(())
-        } else {
-            Err(get_error())
-        }
+    if unsafe { SDL_RenderClear(gfx.renderer) } {
+        Ok(())
+    } else {
+        Err(get_error())
     }
 }
 
 pub fn render_fill_rect(gfx: &Gfx, rect: &SDL_FRect) -> Result<(), String> {
-    unsafe {
-        if SDL_RenderFillRect(gfx.renderer, rect) {
-            Ok(())
-        } else {
-            Err(get_error())
-        }
+    if unsafe { SDL_RenderFillRect(gfx.renderer, rect) } {
+        Ok(())
+    } else {
+        Err(get_error())
     }
 }
 
 pub fn render_present(gfx: &Gfx) -> Result<(), String> {
-    unsafe {
-        if SDL_RenderPresent(gfx.renderer) {
-            Ok(())
-        } else {
-            Err(get_error())
-        }
+    if unsafe { SDL_RenderPresent(gfx.renderer) } {
+        Ok(())
+    } else {
+        Err(get_error())
     }
 }
 
@@ -149,6 +139,13 @@ pub fn open_audio_device(id: SDL_AudioDeviceID) -> Result<SDL_AudioDeviceID, Str
     }
 }
 
+// todo, we're really just pretending stuff like this is safe since I could pass garbage as the id. Consider making these actually safe
+pub fn close_audio_device(id: SDL_AudioDeviceID) {
+    unsafe {
+        SDL_CloseAudioDevice(id);
+    }
+}
+
 pub fn create_audio_stream() -> Result<*mut SDL_AudioStream, String> {
     let audio_steam = unsafe { SDL_CreateAudioStream(&AUDIO_SPEC, &AUDIO_SPEC) };
 
@@ -159,16 +156,24 @@ pub fn create_audio_stream() -> Result<*mut SDL_AudioStream, String> {
     }
 }
 
-pub fn bind_audio_stream(id: SDL_AudioDeviceID, stream: *mut SDL_AudioStream) -> Result<(), String> {
-    unsafe {
-        if SDL_BindAudioStream(id, stream) {
-            Ok(())
-        } else {
-            Err(get_error())
-        }
+pub fn bind_audio_stream(
+    id: SDL_AudioDeviceID,
+    stream: *mut SDL_AudioStream,
+) -> Result<(), String> {
+    if unsafe { SDL_BindAudioStream(id, stream) } {
+        Ok(())
+    } else {
+        Err(get_error())
     }
 }
 
+pub fn flush_audio_stream(stream: *mut SDL_AudioStream) -> Result<(), String> {
+    if unsafe { SDL_FlushAudioStream(stream) } {
+        Ok(())
+    } else {
+        Err(get_error())
+    }
+}
 
 // get all samples of pending audio
 // todo enforce audio is in i32 format when calling this function
@@ -197,4 +202,57 @@ pub fn get_audio_stream_data_i32(stream: *mut SDL_AudioStream) -> Result<Vec<i32
     }
 
     Ok(samples)
+}
+
+#[allow(dead_code)]
+pub enum Event {
+    Common(SDL_CommonEvent),
+    Display(SDL_DisplayEvent),
+    Window(SDL_WindowEvent),
+    KDevice(SDL_KeyboardDeviceEvent),
+    Key(SDL_KeyboardEvent),
+    Edit(SDL_TextEditingEvent),
+    EditCandidates(SDL_TextEditingCandidatesEvent),
+    Text(SDL_TextInputEvent),
+    MDevice(SDL_MouseDeviceEvent),
+    Motion(SDL_MouseMotionEvent),
+    Button(SDL_MouseButtonEvent),
+    Wheel(SDL_MouseWheelEvent),
+    JDevice(SDL_JoyDeviceEvent),
+    JAxis(SDL_JoyAxisEvent),
+    JBall(SDL_JoyBallEvent),
+    JHat(SDL_JoyHatEvent),
+    JButton(SDL_JoyButtonEvent),
+    JBattery(SDL_JoyBatteryEvent),
+    GDevice(SDL_GamepadDeviceEvent),
+    GAxis(SDL_GamepadAxisEvent),
+    GButton(SDL_GamepadButtonEvent),
+    GTouchpad(SDL_GamepadTouchpadEvent),
+    GSensor(SDL_GamepadSensorEvent),
+    ADevice(SDL_AudioDeviceEvent),
+    CDevice(SDL_CameraDeviceEvent),
+    Sensor(SDL_SensorEvent),
+    Quit(SDL_QuitEvent),
+    User(SDL_UserEvent),
+    TFinger(SDL_TouchFingerEvent),
+    PProximity(SDL_PenProximityEvent),
+    PTouch(SDL_PenTouchEvent),
+    PMotion(SDL_PenMotionEvent),
+    PButton(SDL_PenButtonEvent),
+    PAxis(SDL_PenAxisEvent),
+    Render(SDL_RenderEvent),
+    Drop(SDL_DropEvent),
+    Clipboard(SDL_ClipboardEvent),
+}
+
+pub fn poll_event() -> Option<Event> {
+    let mut event = SDL_Event::default();
+    if unsafe { SDL_PollEvent(&mut event) } {
+        match SDL_EventType(unsafe { event.r#type }) {
+            SDL_EventType::QUIT => Some(Event::Quit(unsafe { event.quit })),
+            _ => None,
+        }
+    } else {
+        None
+    }
 }
