@@ -63,8 +63,8 @@ pub fn create_window_and_renderer(
 }
 
 // todo make into trait with gfx as self?
-pub fn set_render_draw_color(gfx: &Gfx, color: SDL_Color) -> Result<(), String> {
-    if unsafe { SDL_SetRenderDrawColor(gfx.renderer, color.r, color.g, color.b, color.a) } {
+pub fn set_render_draw_color(gfx: &Gfx, r: u8, g: u8, b: u8, a: u8) -> Result<(), String> {
+    if unsafe { SDL_SetRenderDrawColor(gfx.renderer, r, g, b, a) } {
         Ok(())
     } else {
         Err(get_error())
@@ -202,6 +202,18 @@ pub fn get_audio_stream_data_i32(stream: *mut SDL_AudioStream) -> Result<Vec<i32
     }
 
     Ok(samples)
+}
+
+pub fn render_debug_text(gfx: &Gfx, text: &str, x: f32, y: f32) -> Result<(), String> {
+    if unsafe {
+        SDL_RenderDebugText(gfx.renderer, x, y, CString::new(text)
+            .expect("debug text to be converted to CString")
+            .as_ptr())
+    } {
+        Ok(())
+    } else {
+        Err(get_error())
+    }
 }
 
 #[allow(dead_code)]
