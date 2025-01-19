@@ -7,7 +7,6 @@ use flacenc::component::BitRepr;
 use flacenc::error::Verify;
 use sdl3_sys::everything::*;
 use std::cmp::{max, min};
-use std::ffi::c_float;
 use std::process::exit;
 use std::time::{Duration, Instant};
 
@@ -26,9 +25,39 @@ fn or_die(result: Result<(), String>) {
 }
 
 // todo copious error checking
+// todo save performance stats and/or performance stats outside of normal
 // todo if audio is for an image, load a thumbnail and display it so it's clearer which file the audio will be associated with. Loading thumbnails rather than the image itself should be both faster and have fewer file formats to deal with. We could even try to load _any_ thumbnail that matches the file in question, say for video files, since we'll only care if there _is_ one.
 // todo Audio should be saved periodically to some temporary location and always on quit in case the wrong button is pressed. Potentially, the audio could be moved to trash if the X button was clicked, rather than save. Or use hidden files, but what would clean them up?
 // todo MVP should ONLY record at end of existing audio.
+
+// todo add error checking, logging, and dad friendly error reporting
+// todo add safeguards such as not overwriting existing recordings and/or saving old recordings to a backup directory on overwrite
+// todo append new data to file and fixup header when recording to an existing file
+// todo show time recorded so far
+// todo add big button to stop recording/exit
+// todo handle multiple paths sent to this program i.e. drop everything after first
+// todo clean up visualization
+// todo warn when clipping occurs
+// todo figure out how to add to right click menu in nautilus without additional click into scripts submenu
+// todo write ffmpeg command such that it will never prompt for user input, such as when attempting to overwrite a file
+// todo pin sdl3 version
+// todo test on other distros
+// todo organize better / refactor / split into separate source files
+// todo see if you can get 24bit audio working
+// todo add message when quitting if writing out is taking awhile (though probably not needed if writing out as we go)
+// todo create a slideshow application that plays the audio with the corresponding picture, advancing to the next once the audio is done. slideshow will play everything in directory
+// todo   add optional "music" for background since he wants to put specific music in the background.
+// todo   slideshow will also display metadata that was entered such as title and comments etc
+// todo add keyboard shortcut to nautilus extension?
+
+// todo periodically check if new audio devices have been added (especially if none of the ideal ones are detected yet), see getaudiorecordingdevices or eventing
+// todo assign flac album cover art to image it was created for with extra audio icon????
+
+// todo load values from config file: interface text to search for,
+
+// todo try to select the first audio input, or test both inputs to see which has any audio signal and use that one
+// todo display a user facing message about needing to turn the audio interface on/plug in if it isn't detected
+
 
 pub fn main() {
     // window inits as x11 instead of wayland due to lack of fifo-v1 protocol in gnome.
