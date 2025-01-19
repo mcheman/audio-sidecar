@@ -1,9 +1,12 @@
+extern crate flacenc;
 extern crate sdl3_sys;
 
-use std::cmp::{max, min};
 use crate::sdl::Event;
 use config::{Config, FileFormat};
+use flacenc::component::BitRepr;
+use flacenc::error::Verify;
 use sdl3_sys::everything::*;
+use std::cmp::{max, min};
 use std::ffi::c_float;
 use std::process::exit;
 use std::time::{Duration, Instant};
@@ -108,6 +111,46 @@ pub fn main() {
                         die(format!("SDL could not flush audio stream: {}", msg).as_str());
                     }
                     sdl::close_audio_device(logical_interface_id);
+
+                    // get last bit of audio
+                    let mut samples = match sdl::get_audio_stream_data_i32(audio_stream) {
+                        Ok(s) => s,
+                        Err(msg) => die(format!("SDL GetAudioStreamData failed: {}", msg).as_str()),
+                    };
+
+                    recorded_audio.append(&mut samples);
+
+                    // clip audio to 24 bits by removing quietest 8 bits
+                    // todo this clipping should be displayed in the waveform so it's clear if something will be chopped off
+                    for s in recorded_audio.iter_mut() {
+                        *s >>= 8;
+                    }
+
+                    // save flac audio
+                    // todo ensure multithreaded and find out which compression level is used, seems like it defaults to max and it can't be adjusted???
+                    let (channels, bits_per_sample, sample_rate) = (1, 24, 44100);
+                    let config = flacenc::config::Encoder::default()
+                        .into_verified()
+                        .expect("Config data error.");
+                    let source = flacenc::source::MemSource::from_samples(
+                        recorded_audio.as_slice(),
+                        channels,
+                        bits_per_sample,
+                        sample_rate,
+                    );
+                    let flac_stream =
+                        flacenc::encode_with_fixed_block_size(&config, source, config.block_size)
+                            .expect("Encode failed.");
+
+                    // `Stream` imlpements `BitRepr` so you can obtain the encoded stream via
+                    // `ByteSink` struct that implements `BitSink`.
+                    let mut sink = flacenc::bitsink::ByteSink::new();
+                    flac_stream.write(&mut sink).expect("TODO: panic message");
+
+                    // Then, e.g. you can write it to a file.
+                    std::fs::write("/tmp/output.flac", sink.as_slice())
+                        .expect("Failed to write flac");
+
                     sdl::quit();
                     exit(0);
                 }
@@ -126,8 +169,6 @@ pub fn main() {
 
         let audio_time = begin_audio.elapsed().as_nanos();
 
-
-
         or_die(sdl::set_render_draw_color(&gfx, 0, 0, 0, 255));
         or_die(sdl::render_clear(&gfx));
         or_die(sdl::set_render_draw_color(&gfx, 255, 150, 255, 255));
@@ -141,9 +182,11 @@ pub fn main() {
         let waveform_display_area = 1600; // pixels
         let display_interval = max_samples_to_render as f64 / waveform_display_area as f64; // render sample after every "display_interval" samples
 
-
         let samples_to_render = min(max_samples_to_render, recorded_audio.len());
-        let start = max(0, recorded_audio.len() as i64 - samples_to_render as i64 - 1) as usize;
+        let start = max(
+            0,
+            recorded_audio.len() as i64 - samples_to_render as i64 - 1,
+        ) as usize;
 
         let mut samples_seen = 0f64;
         let mut max_amplitude = 0;
@@ -153,7 +196,11 @@ pub fn main() {
         let step_size = display_interval / 10.0;
 
         let begin_waveform = Instant::now();
-        for s in recorded_audio.iter().skip(start).step_by(step_size as usize) {
+        for s in recorded_audio
+            .iter()
+            .skip(start)
+            .step_by(step_size as usize)
+        {
             samples_seen += step_size;
             if (*s as i64).abs() > max_amplitude {
                 max_amplitude = (*s as i64).abs();
@@ -178,11 +225,20 @@ pub fn main() {
 
         let waveform_time = begin_waveform.elapsed().as_nanos();
 
-
         or_die(sdl::set_render_draw_color(&gfx, 255, 255, 255, 255));
         or_die(sdl::render_debug_text(&gfx, "AudioSidecar", 10.0, 10.0));
-        or_die(sdl::render_debug_text(&gfx, format!("Audio:    {}", audio_time as f32 / 1000000.0).as_str(), 10.0, 450.0));
-        or_die(sdl::render_debug_text(&gfx, format!("Waveform: {}", waveform_time as f32 / 1000000.0).as_str(), 10.0, 470.0));
+        or_die(sdl::render_debug_text(
+            &gfx,
+            format!("Audio:    {}", audio_time as f32 / 1000000.0).as_str(),
+            10.0,
+            450.0,
+        ));
+        or_die(sdl::render_debug_text(
+            &gfx,
+            format!("Waveform: {}", waveform_time as f32 / 1000000.0).as_str(),
+            10.0,
+            470.0,
+        ));
 
         or_die(sdl::render_present(&gfx));
 
