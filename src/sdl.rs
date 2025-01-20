@@ -262,7 +262,7 @@ pub fn poll_event() -> Option<Event> {
     if unsafe { SDL_PollEvent(&mut event) } {
         match SDL_EventType(unsafe { event.r#type }) {
             SDL_EventType::QUIT => Some(Event::Quit(unsafe { event.quit })),
-            _ => None,
+            _ => Some(Event::User(unsafe { event.user })), // dummy event so we can decern an unimplemented event (in this function) from NO event
         }
     } else {
         None

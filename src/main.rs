@@ -7,6 +7,8 @@ use flacenc::component::BitRepr;
 use flacenc::error::Verify;
 use sdl3_sys::everything::*;
 use std::cmp::{max, min};
+use std::env;
+use std::path::Path;
 use std::process::exit;
 use std::time::{Duration, Instant};
 
@@ -26,7 +28,7 @@ fn or_die(result: Result<(), String>) {
 
 // todo copious error checking
 // todo save performance stats and/or performance stats outside of normal
-// todo if audio is for an image, load a thumbnail and display it so it's clearer which file the audio will be associated with. Loading thumbnails rather than the image itself should be both faster and have fewer file formats to deal with. We could even try to load _any_ thumbnail that matches the file in question, say for video files, since we'll only care if there _is_ one.
+// todo if audio is for an image, load a thumbnail and display it so it's clearer which file the audio will be associated with. Loading thumbnails rather than the image itself should be both faster and have fewer file formats to deal with. We could even try to load _any_ thumbnail that matches the file in question, say for video files, since we'll only care if there _is_ one. See https://askubuntu.com/questions/1368910/how-to-create-custom-thumbnailers-for-nautilus-nemo-and-caja and https://specifications.freedesktop.org/thumbnail-spec/latest/thumbsave.html
 // todo Audio should be saved periodically to some temporary location and always on quit in case the wrong button is pressed. Potentially, the audio could be moved to trash if the X button was clicked, rather than save. Or use hidden files, but what would clean them up?
 // todo MVP should ONLY record at end of existing audio.
 
@@ -58,17 +60,26 @@ fn or_die(result: Result<(), String>) {
 // todo try to select the first audio input, or test both inputs to see which has any audio signal and use that one
 // todo display a user facing message about needing to turn the audio interface on/plug in if it isn't detected
 
-
 pub fn main() {
+    let args: Vec<String> = env::args().collect();
+
+    let defaultpath = String::from("/tmp/test.png");
+    let filepath = Path::new(args.get(1).unwrap_or(&defaultpath));
+
+    println!("Using input file: {:?}", filepath);
+
     // window inits as x11 instead of wayland due to lack of fifo-v1 protocol in gnome.
     // fifo-v1 was added here https://gitlab.gnome.org/GNOME/mutter/-/merge_requests/3355 and will be present in gnome 48.
     // The X11 window is responsible for the window flashing on creation. Wayland does not experience this issue.
     // SDL_VIDEO_DRIVER=wayland can force wayland
 
     let settings = Config::builder()
-        .add_source(config::File::new("audio-sidecar-config", FileFormat::Toml))
+        .add_source(config::File::new(
+            "./audio-sidecar-config",
+            FileFormat::Toml,
+        ))
         .build()
-        .unwrap();
+        .unwrap(); // todo this should have defaults and not panic if config file doesn't exist
 
     let interface: String = settings
         .get("Interface")
@@ -130,12 +141,17 @@ pub fn main() {
     let mut recorded_audio: Vec<i32> = Vec::new();
 
     loop {
+        let frame_start = Instant::now();
         // poll until all events are handled and the queue runs dry
+        let mut num_events = 0;
         while let Some(event) = sdl::poll_event() {
+            num_events += 1;
             match event {
                 // todo New events will have to be added both here and in sdl::poll_event()
                 // todo check timestamp of event and compare to time to see how much elapsed between when X was clicked and when the event finally got handled to debug the slow close
                 Event::Quit(_) => {
+                    println!("Quitting");
+
                     if let Err(msg) = sdl::flush_audio_stream(audio_stream) {
                         die(format!("SDL could not flush audio stream: {}", msg).as_str());
                     }
@@ -177,8 +193,9 @@ pub fn main() {
                     flac_stream.write(&mut sink).expect("TODO: panic message");
 
                     // Then, e.g. you can write it to a file.
-                    std::fs::write("/tmp/output.flac", sink.as_slice())
-                        .expect("Failed to write flac");
+                    // todo add string at end of filename, before extension, so the audio sidecar sorts after the file
+                    let outputfile = filepath.with_extension("flac");
+                    std::fs::write(outputfile, sink.as_slice()).expect("Failed to write flac");
 
                     sdl::quit();
                     exit(0);
@@ -186,6 +203,8 @@ pub fn main() {
                 _ => continue,
             }
         }
+
+        let event_time = frame_start.elapsed().as_nanos();
 
         let begin_audio = Instant::now();
 
@@ -198,9 +217,9 @@ pub fn main() {
 
         let audio_time = begin_audio.elapsed().as_nanos();
 
-        or_die(sdl::set_render_draw_color(&gfx, 0, 0, 0, 255));
+        or_die(sdl::set_render_draw_color(&gfx, 35, 35, 40, 255));
         or_die(sdl::render_clear(&gfx));
-        or_die(sdl::set_render_draw_color(&gfx, 255, 150, 255, 255));
+        or_die(sdl::set_render_draw_color(&gfx, 255, 255, 255, 255));
 
         // render waveform for last 10 sec
         // todo put this in its own handler widget thing which only renders the new audio to a buffer which can then be scrolled on the screen, rather than line rendering the whole waveform
@@ -268,9 +287,25 @@ pub fn main() {
             10.0,
             470.0,
         ));
+        or_die(sdl::render_debug_text(
+            &gfx,
+            format!("Events:   {}", event_time as f32 / 1000000.0).as_str(),
+            10.0,
+            490.0,
+        ));
+        or_die(sdl::render_debug_text(
+            &gfx,
+            format!("Num Events: {}", num_events).as_str(),
+            10.0,
+            510.0,
+        ));
 
         or_die(sdl::render_present(&gfx));
 
-        ::std::thread::sleep(Duration::new(0, 1_000_000_000u32 / 120));
+        // ::std::thread::sleep(Duration::new(0, 1_000_000_000u32 / 120));
+        ::std::thread::sleep(
+            Duration::new(0, 1_000_000_000u32 / 60)
+                .saturating_sub(Instant::now().duration_since(frame_start)),
+        ); // wait until frame time equals 1/60 sec
     }
 }

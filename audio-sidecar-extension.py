@@ -12,8 +12,9 @@ from typing import List
 import subprocess
 
 
-class TestExtension(GObject.GObject, Nautilus.MenuProvider):
-    VALID_MIMETYPES = ('image/png', 'image/jpeg')
+class AudioSidecarExtension(GObject.GObject, Nautilus.MenuProvider):
+    # VALID_MIMETYPES = ('image/png', 'image/jpeg')
+
     def __init__(self):
         super().__init__()
 
@@ -22,21 +23,23 @@ class TestExtension(GObject.GObject, Nautilus.MenuProvider):
             menu: Nautilus.MenuItem,
             file: Nautilus.FileInfo,
     ) -> None:
-        subprocess.Popen(['/speed/programs/audio-sidecar/cmake-build-debug/audio_sidecar', file.get_location().get_path()])
+        subprocess.Popen(
+            ['/speed/programs/audio-sidecar/target/debug/audio_sidecar', file.get_location().get_path()],
+            cwd='/speed/programs/audio-sidecar/')
 
     def get_file_items(
             self,
             files: List[Nautilus.FileInfo],
     ) -> List[Nautilus.MenuItem]:
-        if len(files) != 1 or files[0].get_mime_type() not in self.VALID_MIMETYPES:
-            return []
+        # if len(files) != 1 or files[0].get_mime_type() not in self.VALID_MIMETYPES:
+        #     return []
 
         file = files[0]
 
         item = Nautilus.MenuItem(
             name="SimpleMenuExtension::Show_File_Name",
             label="Record Audio",
-            tip="Record Audio Tip",
+            tip="Record audio for this file. The audio will be named the same so it sorts next to the file",
         )
         item.connect("activate", self.menu_activate_cb, file)
 
