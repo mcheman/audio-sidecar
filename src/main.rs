@@ -5,14 +5,13 @@ use crate::sdl::Event;
 use config::{Config, FileFormat};
 use flacenc::component::BitRepr;
 use flacenc::error::Verify;
-use log::{error, info, LevelFilter};
+use log::{error, info};
 use sdl3_sys::everything::*;
-use std::cmp::{max, min};
-use std::fs::{File, OpenOptions};
+use std::cmp::max;
 use std::path::Path;
 use std::process::exit;
 use std::str::FromStr;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 use std::{env, io};
 use tracing::Level;
 use tracing_subscriber::fmt::writer::MakeWriterExt;
@@ -293,7 +292,6 @@ pub fn main() {
 
         previous_unchunked_samples.append(&mut samples);
         let mut max_sample = 0;
-        let n = 0;
         for n in 0..previous_unchunked_samples.len() / CHUNKSIZE {
             for i in 0..CHUNKSIZE {
                 let v = (previous_unchunked_samples[n * CHUNKSIZE + i] as i64).abs() as u32;
@@ -312,61 +310,74 @@ pub fn main() {
 
         let audio_time = begin_audio.elapsed().as_nanos();
 
-        or_die(gfx.set_render_draw_color(43, 43, 43, 255));
+        or_die(gfx.set_render_draw_color(53, 53, 53, 255));
         or_die(gfx.render_clear());
+
+        const BORDER_SIZE: f32 = 10.0;
+
+        or_die(gfx.set_render_draw_color(43, 43, 43, 255));
+        let rect = SDL_FRect{
+            x: BORDER_SIZE,
+            y: BORDER_SIZE,
+            w: window_width as f32 - BORDER_SIZE * 2.0,
+            h: 400.0,
+        };
+        or_die(gfx.render_fill_rect(&rect));
+
         or_die(gfx.set_render_draw_color(255, 255, 255, 255));
 
         // todo put this in its own handler widget thing which only renders the new audio to a buffer which can then be scrolled on the screen, rather than line rendering the whole waveform
 
         let begin_waveform = Instant::now();
 
-        let chunks_to_render = window_width; // one chunk per pixel
+        let chunks_to_render = window_width - 20; // one chunk per pixel
         for (x, m) in display_waveform
             .iter()
             .skip(max(0, display_waveform.len() as i64 - chunks_to_render as i64) as usize)
             .enumerate()
         {
             let h = *m as f32 * (400.0 / (i32::MAX >> 8) as f32);
-            let y1 = (400.0 / 2.0) - (h / 2.0);
+            let y1 = BORDER_SIZE + (400.0 / 2.0) - (h / 2.0);
             let y2 = y1 + h;
             if h > 390.0 {
                 or_die(gfx.set_render_draw_color(255, 43, 43, 255));
             }
-            or_die(gfx.render_line(x as f32, y1, x as f32, y2));
+            or_die(gfx.render_line(BORDER_SIZE + x as f32, y1, BORDER_SIZE + x as f32, y2));
             if h > 390.0 {
                 or_die(gfx.set_render_draw_color(255, 255, 255, 255));
             }
         }
 
+        or_die(gfx.set_render_scale(2.0, 2.0));
         or_die(gfx.render_debug_text(
             format!("{:.3}s", recorded_audio.len() as f64 / 44100.0).as_str(),
-            100.0,
-            410.0,
+            (BORDER_SIZE + 4.0) / 2.0,
+            (400.0 + BORDER_SIZE + 8.0) / 2.0,
         ));
+        or_die(gfx.set_render_scale(1.0, 1.0));
 
         let waveform_time = begin_waveform.elapsed().as_nanos();
 
         or_die(gfx.set_render_draw_color(255, 255, 255, 255));
-        or_die(gfx.render_debug_text("AudioSidecar", 10.0, 10.0));
         or_die(gfx.render_debug_text(
             format!("Audio:    {:.2}", audio_time as f32 / 1000000.0).as_str(),
             10.0,
-            450.0,
+            550.0,
         ));
         or_die(gfx.render_debug_text(
             format!("Waveform: {:.2}", waveform_time as f32 / 1000000.0).as_str(),
             10.0,
-            470.0,
+            560.0,
         ));
         or_die(gfx.render_debug_text(
             format!("Events:   {:.2}", event_time as f32 / 1000000.0).as_str(),
             10.0,
-            490.0,
+            570.0,
         ));
         or_die(gfx.render_debug_text(
             format!("Num Events: {:.2}", num_events).as_str(),
             10.0,
-            510.0,
+            580.0,
         ));
 
         or_die(gfx.render_present());

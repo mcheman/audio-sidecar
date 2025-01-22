@@ -103,6 +103,10 @@ impl Gfx {
             )
         })
     }
+
+    pub fn set_render_scale(&self, x_scale: f32, y_scale: f32) -> Result<(), String> {
+        ok_or_err(unsafe { SDL_SetRenderScale(self.renderer, x_scale, y_scale) })
+    }
 }
 
 pub struct AudioDevice {
