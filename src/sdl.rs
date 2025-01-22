@@ -87,8 +87,24 @@ pub fn render_fill_rect(gfx: &Gfx, rect: &SDL_FRect) -> Result<(), String> {
     }
 }
 
+pub fn render_line(gfx: &Gfx, x1: f32, y1: f32, x2: f32, y2: f32) -> Result<(), String> {
+    if unsafe { SDL_RenderLine(gfx.renderer, x1, y1, x2, y2) } {
+        Ok(())
+    } else {
+        Err(get_error())
+    }
+}
+
 pub fn render_present(gfx: &Gfx) -> Result<(), String> {
     if unsafe { SDL_RenderPresent(gfx.renderer) } {
+        Ok(())
+    } else {
+        Err(get_error())
+    }
+}
+
+pub fn set_render_vsync(gfx: &Gfx, vsync: i32) -> Result<(), String> {
+    if unsafe { SDL_SetRenderVSync(gfx.renderer, vsync) } {
         Ok(())
     } else {
         Err(get_error())
@@ -220,7 +236,7 @@ pub fn render_debug_text(gfx: &Gfx, text: &str, x: f32, y: f32) -> Result<(), St
 pub enum Event {
     Common(SDL_CommonEvent),
     Display(SDL_DisplayEvent),
-    Window(SDL_WindowEvent),
+    Window(SDL_EventType, SDL_WindowEvent),
     KDevice(SDL_KeyboardDeviceEvent),
     Key(SDL_KeyboardEvent),
     Edit(SDL_TextEditingEvent),
@@ -262,6 +278,7 @@ pub fn poll_event() -> Option<Event> {
     if unsafe { SDL_PollEvent(&mut event) } {
         match SDL_EventType(unsafe { event.r#type }) {
             SDL_EventType::QUIT => Some(Event::Quit(unsafe { event.quit })),
+            SDL_EventType::WINDOW_RESIZED => Some(Event::Window( SDL_EventType::WINDOW_RESIZED, unsafe { event.window })),
             _ => Some(Event::User(unsafe { event.user })), // dummy event so we can decern an unimplemented event (in this function) from NO event
         }
     } else {

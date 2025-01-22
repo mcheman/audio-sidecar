@@ -84,10 +84,10 @@ pub fn main() {
     let interface: String = settings
         .get("Interface")
         .expect("Interface key to exist in config file");
-    let window_width: u32 = settings
+    let mut window_width: u32 = settings
         .get("WindowWidth")
         .expect("WindowWidth key to exist in config file");
-    let window_height: u32 = settings
+    let mut window_height: u32 = settings
         .get("WindowHeight")
         .expect("WindowHeight key to exist in config file");
 
@@ -104,6 +104,10 @@ pub fn main() {
         Ok(gfx) => gfx,
         Err(msg) => die(format!("SDL window creation failed: {}", msg).as_str()),
     };
+
+    if let Err(msg) = sdl::set_render_vsync(&gfx, 1) {
+        die(format!("SDL vsync failed to enable: {}", msg).as_str());
+    }
 
     let recording_devices = match sdl::get_audio_recording_devices() {
         Ok(a) => a,
@@ -140,6 +144,9 @@ pub fn main() {
 
     let mut recorded_audio: Vec<i32> = Vec::new();
 
+    let mut display_waveform: Vec<u32> = Vec::new();
+    let mut previous_unchunked_samples: Vec<i32> = Vec::new();
+
     loop {
         let frame_start = Instant::now();
         // poll until all events are handled and the queue runs dry
@@ -149,6 +156,12 @@ pub fn main() {
             match event {
                 // todo New events will have to be added both here and in sdl::poll_event()
                 // todo check timestamp of event and compare to time to see how much elapsed between when X was clicked and when the event finally got handled to debug the slow close
+                Event::Window(event_type, e) => {
+                    if event_type == SDL_EventType::WINDOW_RESIZED {
+                        window_width = e.data1 as u32;
+                        window_height = e.data2 as u32;
+                    }
+                }
                 Event::Quit(_) => {
                     println!("Quitting");
 
@@ -162,14 +175,12 @@ pub fn main() {
                         Ok(s) => s,
                         Err(msg) => die(format!("SDL GetAudioStreamData failed: {}", msg).as_str()),
                     };
-
-                    recorded_audio.append(&mut samples);
-
                     // clip audio to 24 bits by removing quietest 8 bits
-                    // todo this clipping should be displayed in the waveform so it's clear if something will be chopped off
-                    for s in recorded_audio.iter_mut() {
+                    for s in samples.iter_mut() {
                         *s >>= 8;
                     }
+
+                    recorded_audio.append(&mut samples);
 
                     // save flac audio
                     // todo ensure multithreaded and find out which compression level is used, seems like it defaults to max and it can't be adjusted???
@@ -187,7 +198,7 @@ pub fn main() {
                         flacenc::encode_with_fixed_block_size(&config, source, config.block_size)
                             .expect("Encode failed.");
 
-                    // `Stream` imlpements `BitRepr` so you can obtain the encoded stream via
+                    // `Stream` implements `BitRepr` so you can obtain the encoded stream via
                     // `ByteSink` struct that implements `BitSink`.
                     let mut sink = flacenc::bitsink::ByteSink::new();
                     flac_stream.write(&mut sink).expect("TODO: panic message");
@@ -213,63 +224,69 @@ pub fn main() {
             Err(msg) => die(format!("SDL GetAudioStreamData failed: {}", msg).as_str()),
         };
 
-        recorded_audio.append(&mut samples);
+        // clip audio to 24 bits by removing quietest 8 bits
+        for s in samples.iter_mut() {
+            *s >>= 8;
+        }
+
+        recorded_audio.append(&mut samples.clone());
+
+        // combine audio into chunks for display
+        const CHUNKSIZE: usize = 44100 / 100; // samples
+
+        previous_unchunked_samples.append(&mut samples);
+        let mut max_sample = 0;
+        let n = 0;
+        for n in 0..previous_unchunked_samples.len() / CHUNKSIZE {
+            for i in 0..CHUNKSIZE {
+                let v = (previous_unchunked_samples[n * CHUNKSIZE + i] as i64).abs() as u32;
+                if v > max_sample {
+                    max_sample = v;
+                }
+            }
+            display_waveform.push(max_sample);
+            max_sample = 0;
+        }
+        previous_unchunked_samples = previous_unchunked_samples
+            .iter()
+            .skip((previous_unchunked_samples.len() / CHUNKSIZE) * CHUNKSIZE)
+            .cloned()
+            .collect();
 
         let audio_time = begin_audio.elapsed().as_nanos();
 
-        or_die(sdl::set_render_draw_color(&gfx, 35, 35, 40, 255));
+        or_die(sdl::set_render_draw_color(&gfx, 43, 43, 43, 255));
         or_die(sdl::render_clear(&gfx));
         or_die(sdl::set_render_draw_color(&gfx, 255, 255, 255, 255));
 
-        // render waveform for last 10 sec
         // todo put this in its own handler widget thing which only renders the new audio to a buffer which can then be scrolled on the screen, rather than line rendering the whole waveform
-        // todo or look at rendering fewer samples and optimizing
-        // todo only draw "chunked" sections of the waveform so the running average/max is always the same for a chunk, then scroll the buffer to simulate movement
-        // todo OR have a smaller vector which contains the result of chunking the audio down. i.e. each index contains the result of max(1000 samples). Then we can take an average over this for display
-        let max_samples_to_render = 44100 * 20;
-        let waveform_display_area = 1600; // pixels
-        let display_interval = max_samples_to_render as f64 / waveform_display_area as f64; // render sample after every "display_interval" samples
-
-        let samples_to_render = min(max_samples_to_render, recorded_audio.len());
-        let start = max(
-            0,
-            recorded_audio.len() as i64 - samples_to_render as i64 - 1,
-        ) as usize;
-
-        let mut samples_seen = 0f64;
-        let mut max_amplitude = 0;
-        // let mut average = 0f64;
-        let mut x = 0;
-
-        let step_size = display_interval / 10.0;
 
         let begin_waveform = Instant::now();
-        for s in recorded_audio
+
+        let chunks_to_render = window_width; // one chunk per pixel
+        for (x, m) in display_waveform
             .iter()
-            .skip(start)
-            .step_by(step_size as usize)
+            .skip(max(0, display_waveform.len() as i64 - chunks_to_render as i64) as usize)
+            .enumerate()
         {
-            samples_seen += step_size;
-            if (*s as i64).abs() > max_amplitude {
-                max_amplitude = (*s as i64).abs();
+            let h = *m as f32 * (400.0 / (i32::MAX >> 8) as f32);
+            let y1 = (400.0 / 2.0) - (h / 2.0);
+            let y2 = y1 + h;
+            if h > 390.0 {
+                or_die(sdl::set_render_draw_color(&gfx, 255, 43, 43, 255));
             }
-
-            if samples_seen > display_interval {
-                samples_seen -= display_interval;
-
-                let rect = SDL_FRect {
-                    h: max_amplitude as f32 * (400.0 / i32::MAX as f32),
-                    w: 1.0,
-                    x: x as f32,
-                    y: (400.0 / 2.0) - (max_amplitude as f32 / 2.0 * (400.0 / i32::MAX as f32)),
-                };
-
-                or_die(sdl::render_fill_rect(&gfx, &rect));
-
-                x += 1;
-                max_amplitude = 0;
+            or_die(sdl::render_line(&gfx, x as f32, y1, x as f32, y2));
+            if h > 390.0 {
+                or_die(sdl::set_render_draw_color(&gfx, 255, 255, 255, 255));
             }
         }
+
+        or_die(sdl::render_debug_text(
+            &gfx,
+            format!("{:.3}s", recorded_audio.len() as f64 / 44100.0).as_str(),
+            100.0,
+            410.0,
+        ));
 
         let waveform_time = begin_waveform.elapsed().as_nanos();
 
@@ -277,35 +294,34 @@ pub fn main() {
         or_die(sdl::render_debug_text(&gfx, "AudioSidecar", 10.0, 10.0));
         or_die(sdl::render_debug_text(
             &gfx,
-            format!("Audio:    {}", audio_time as f32 / 1000000.0).as_str(),
+            format!("Audio:    {:.2}", audio_time as f32 / 1000000.0).as_str(),
             10.0,
             450.0,
         ));
         or_die(sdl::render_debug_text(
             &gfx,
-            format!("Waveform: {}", waveform_time as f32 / 1000000.0).as_str(),
+            format!("Waveform: {:.2}", waveform_time as f32 / 1000000.0).as_str(),
             10.0,
             470.0,
         ));
         or_die(sdl::render_debug_text(
             &gfx,
-            format!("Events:   {}", event_time as f32 / 1000000.0).as_str(),
+            format!("Events:   {:.2}", event_time as f32 / 1000000.0).as_str(),
             10.0,
             490.0,
         ));
         or_die(sdl::render_debug_text(
             &gfx,
-            format!("Num Events: {}", num_events).as_str(),
+            format!("Num Events: {:.2}", num_events).as_str(),
             10.0,
             510.0,
         ));
 
         or_die(sdl::render_present(&gfx));
 
-        // ::std::thread::sleep(Duration::new(0, 1_000_000_000u32 / 120));
-        ::std::thread::sleep(
-            Duration::new(0, 1_000_000_000u32 / 60)
-                .saturating_sub(Instant::now().duration_since(frame_start)),
-        ); // wait until frame time equals 1/60 sec
+        // ::std::thread::sleep(
+        //     Duration::new(0, 1_000_000_000u32 / 60)
+        //         .saturating_sub(Instant::now().duration_since(frame_start)),
+        // ); // wait until frame time equals 1/60 sec
     }
 }
