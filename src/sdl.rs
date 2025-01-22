@@ -7,7 +7,7 @@ use std::ptr;
 const AUDIO_SPEC: SDL_AudioSpec = SDL_AudioSpec {
     channels: 1,
     freq: 44100,
-    format: SDL_AudioFormat::S32, // todo can I simply truncate 32 bit samples to 24 bit for the flac encoder?
+    format: SDL_AudioFormat::S32,
 };
 
 pub struct Gfx {

@@ -12,3 +12,7 @@ flacenc = "0.4.0"
 #claxon = "0.4.3"
 # for text rendering until a sdl3_ttf crate is available
 #cosmic-text = "0.12.1"
+log = "0.4.25"
+tracing = "0.1.41"
+tracing-subscriber = { version = "0.3.19"}
+tracing-appender = "0.2.3"

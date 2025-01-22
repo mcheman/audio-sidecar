@@ -5,17 +5,24 @@ use crate::sdl::Event;
 use config::{Config, FileFormat};
 use flacenc::component::BitRepr;
 use flacenc::error::Verify;
+use log::{error, info, LevelFilter};
 use sdl3_sys::everything::*;
 use std::cmp::{max, min};
-use std::env;
+use std::fs::{File, OpenOptions};
 use std::path::Path;
 use std::process::exit;
+use std::str::FromStr;
 use std::time::{Duration, Instant};
+use std::{env, io};
+use tracing::Level;
+use tracing_subscriber::fmt::writer::MakeWriterExt;
+use tracing_subscriber::util::SubscriberInitExt;
+use tracing_subscriber::{fmt, layer::SubscriberExt};
 
 mod sdl;
 
 fn die(s: &str) -> ! {
-    println!("{}", s);
+    error!("{}", s);
     sdl::quit();
     panic!();
 }
@@ -60,50 +67,92 @@ fn or_die(result: Result<(), String>) {
 // todo try to select the first audio input, or test both inputs to see which has any audio signal and use that one
 // todo display a user facing message about needing to turn the audio interface on/plug in if it isn't detected
 
+struct ProgramConfig {
+    interface: String, // search string for the audio interface to use
+    window_width: u32,
+    window_height: u32,
+    log_file: String,
+    log_level: String,
+}
+
+impl ProgramConfig {
+    fn from_file() -> Result<ProgramConfig, String> {
+        let settings = Config::builder()
+            .add_source(config::File::new(
+                "./audio-sidecar-config",
+                FileFormat::Toml,
+            ))
+            .build()
+            .unwrap(); // todo this should have defaults and not panic if config file doesn't exist
+
+        let interface: String = settings.get("Interface").unwrap_or(String::from(""));
+        let window_width: u32 = settings.get("WindowWidth").unwrap_or(1200);
+        let window_height: u32 = settings.get("WindowHeight").unwrap_or(600);
+        let log_file: String = settings
+            .get("LogFile")
+            .unwrap_or(String::from("audioSidecar.log"));
+        let log_level: String = settings.get("LogLevel").unwrap_or(String::from("debug"));
+
+        Ok(ProgramConfig {
+            interface,
+            window_width,
+            window_height,
+            log_file,
+            log_level,
+        })
+    }
+}
+
 pub fn main() {
+    let config = ProgramConfig::from_file().unwrap();
+
+    let log_path = Path::new(&config.log_file);
+    let file_appender = tracing_appender::rolling::never(
+        log_path.parent().unwrap_or(".".as_ref()),
+        log_path.file_name().unwrap_or("audiosidecar.log".as_ref()),
+    );
+    let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
+
+    let level = Level::from_str(config.log_level.as_str()).unwrap_or(Level::INFO);
+
+    let subscriber = tracing_subscriber::registry()
+        .with(fmt::Layer::new().with_writer(io::stdout.with_max_level(level)))
+        .with(
+            fmt::Layer::new()
+                .with_ansi(false)
+                .with_writer(non_blocking.with_max_level(level)),
+        );
+    subscriber.init();
+
+    error!("test error");
+    info!("Program starting");
+
     let args: Vec<String> = env::args().collect();
 
     let defaultpath = String::from("/tmp/test.png");
     let filepath = Path::new(args.get(1).unwrap_or(&defaultpath));
-
-    println!("Using input file: {:?}", filepath);
-
-    // window inits as x11 instead of wayland due to lack of fifo-v1 protocol in gnome.
-    // fifo-v1 was added here https://gitlab.gnome.org/GNOME/mutter/-/merge_requests/3355 and will be present in gnome 48.
-    // The X11 window is responsible for the window flashing on creation. Wayland does not experience this issue.
-    // SDL_VIDEO_DRIVER=wayland can force wayland
-
-    let settings = Config::builder()
-        .add_source(config::File::new(
-            "./audio-sidecar-config",
-            FileFormat::Toml,
-        ))
-        .build()
-        .unwrap(); // todo this should have defaults and not panic if config file doesn't exist
-
-    let interface: String = settings
-        .get("Interface")
-        .expect("Interface key to exist in config file");
-    let mut window_width: u32 = settings
-        .get("WindowWidth")
-        .expect("WindowWidth key to exist in config file");
-    let mut window_height: u32 = settings
-        .get("WindowHeight")
-        .expect("WindowHeight key to exist in config file");
+    info!("Using input file: {:?}", filepath);
 
     if let Err(msg) = sdl::init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_EVENTS) {
         die(format!("SDL initialization failed: {}", msg).as_str());
     }
 
+    // window inits as x11 instead of wayland due to lack of fifo-v1 protocol in gnome.
+    // fifo-v1 was added here https://gitlab.gnome.org/GNOME/mutter/-/merge_requests/3355 and will be present in gnome 48.
+    // The X11 window is responsible for the window flashing on creation. Wayland does not experience this issue.
+    // SDL_VIDEO_DRIVER=wayland can force wayland
     let gfx = match sdl::create_window_and_renderer(
         "Record Audio",
-        window_width,
-        window_height,
+        config.window_width,
+        config.window_height,
         SDL_WINDOW_RESIZABLE,
     ) {
         Ok(gfx) => gfx,
         Err(msg) => die(format!("SDL window creation failed: {}", msg).as_str()),
     };
+
+    let mut window_width = config.window_width;
+    let mut window_height = config.window_height;
 
     if let Err(msg) = gfx.set_render_vsync(1) {
         die(format!("SDL vsync failed to enable: {}", msg).as_str());
@@ -112,20 +161,24 @@ pub fn main() {
     let recording_devices = match sdl::get_audio_recording_devices() {
         Ok(a) => a,
         Err(msg) => die(format!("SDL finding audio recording devices failed: {}", msg).as_str()),
-    };1
+    };
 
     let mut desired_interface_id = SDL_AUDIO_DEVICE_DEFAULT_RECORDING;
 
-    println!("Found {} Audio Devices:", recording_devices.len());
+    info!("Found {} Audio Devices:", recording_devices.len());
     for device in recording_devices {
-        let found = if device.name.to_lowercase().contains(interface.as_str()) {
+        let found = if device
+            .name
+            .to_lowercase()
+            .contains(config.interface.as_str())
+        {
             desired_interface_id = device.id;
             " <<<< MATCH FOUND <<<<"
         } else {
             ""
         };
 
-        println!("\t{} {}", device.name, found);
+        info!("\t{} {}", device.name, found);
     }
 
     let logical_interface_id = match sdl::open_audio_device(desired_interface_id) {
@@ -163,7 +216,7 @@ pub fn main() {
                     }
                 }
                 Event::Quit(_) => {
-                    println!("Quitting");
+                    info!("Shutting down");
 
                     if let Err(msg) = sdl::flush_audio_stream(audio_stream) {
                         die(format!("SDL could not flush audio stream: {}", msg).as_str());
@@ -186,7 +239,7 @@ pub fn main() {
 
                     // save flac audio
                     // todo ensure multithreaded and find out which compression level is used, seems like it defaults to max and it can't be adjusted???
-                    let (channels, bits_per_sample, sample_rate) = (1, 24, 44100);
+                    let (channels, bits_per_sample, sample_rate) = (1, 24, 96000);
                     let config = flacenc::config::Encoder::default()
                         .into_verified()
                         .expect("Config data error.");
@@ -209,6 +262,8 @@ pub fn main() {
                     // todo add string at end of filename, before extension, so the audio sidecar sorts after the file
                     let outputfile = filepath.with_extension("flac");
                     std::fs::write(outputfile, sink.as_slice()).expect("Failed to write flac");
+
+                    info!("Audio output written");
 
                     sdl::quit();
                     exit(0);
