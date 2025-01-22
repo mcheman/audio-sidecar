@@ -105,14 +105,14 @@ pub fn main() {
         Err(msg) => die(format!("SDL window creation failed: {}", msg).as_str()),
     };
 
-    if let Err(msg) = sdl::set_render_vsync(&gfx, 1) {
+    if let Err(msg) = gfx.set_render_vsync(1) {
         die(format!("SDL vsync failed to enable: {}", msg).as_str());
     }
 
     let recording_devices = match sdl::get_audio_recording_devices() {
         Ok(a) => a,
         Err(msg) => die(format!("SDL finding audio recording devices failed: {}", msg).as_str()),
-    };
+    };1
 
     let mut desired_interface_id = SDL_AUDIO_DEVICE_DEFAULT_RECORDING;
 
@@ -181,6 +181,8 @@ pub fn main() {
                     }
 
                     recorded_audio.append(&mut samples);
+
+                    //sdl::quit(); // todo hide window while audio exports so it looks immediate? alternately show a progress bar?
 
                     // save flac audio
                     // todo ensure multithreaded and find out which compression level is used, seems like it defaults to max and it can't be adjusted???
@@ -255,9 +257,9 @@ pub fn main() {
 
         let audio_time = begin_audio.elapsed().as_nanos();
 
-        or_die(sdl::set_render_draw_color(&gfx, 43, 43, 43, 255));
-        or_die(sdl::render_clear(&gfx));
-        or_die(sdl::set_render_draw_color(&gfx, 255, 255, 255, 255));
+        or_die(gfx.set_render_draw_color(43, 43, 43, 255));
+        or_die(gfx.render_clear());
+        or_die(gfx.set_render_draw_color(255, 255, 255, 255));
 
         // todo put this in its own handler widget thing which only renders the new audio to a buffer which can then be scrolled on the screen, rather than line rendering the whole waveform
 
@@ -273,16 +275,15 @@ pub fn main() {
             let y1 = (400.0 / 2.0) - (h / 2.0);
             let y2 = y1 + h;
             if h > 390.0 {
-                or_die(sdl::set_render_draw_color(&gfx, 255, 43, 43, 255));
+                or_die(gfx.set_render_draw_color(255, 43, 43, 255));
             }
-            or_die(sdl::render_line(&gfx, x as f32, y1, x as f32, y2));
+            or_die(gfx.render_line(x as f32, y1, x as f32, y2));
             if h > 390.0 {
-                or_die(sdl::set_render_draw_color(&gfx, 255, 255, 255, 255));
+                or_die(gfx.set_render_draw_color(255, 255, 255, 255));
             }
         }
 
-        or_die(sdl::render_debug_text(
-            &gfx,
+        or_die(gfx.render_debug_text(
             format!("{:.3}s", recorded_audio.len() as f64 / 44100.0).as_str(),
             100.0,
             410.0,
@@ -290,34 +291,30 @@ pub fn main() {
 
         let waveform_time = begin_waveform.elapsed().as_nanos();
 
-        or_die(sdl::set_render_draw_color(&gfx, 255, 255, 255, 255));
-        or_die(sdl::render_debug_text(&gfx, "AudioSidecar", 10.0, 10.0));
-        or_die(sdl::render_debug_text(
-            &gfx,
+        or_die(gfx.set_render_draw_color(255, 255, 255, 255));
+        or_die(gfx.render_debug_text("AudioSidecar", 10.0, 10.0));
+        or_die(gfx.render_debug_text(
             format!("Audio:    {:.2}", audio_time as f32 / 1000000.0).as_str(),
             10.0,
             450.0,
         ));
-        or_die(sdl::render_debug_text(
-            &gfx,
+        or_die(gfx.render_debug_text(
             format!("Waveform: {:.2}", waveform_time as f32 / 1000000.0).as_str(),
             10.0,
             470.0,
         ));
-        or_die(sdl::render_debug_text(
-            &gfx,
+        or_die(gfx.render_debug_text(
             format!("Events:   {:.2}", event_time as f32 / 1000000.0).as_str(),
             10.0,
             490.0,
         ));
-        or_die(sdl::render_debug_text(
-            &gfx,
+        or_die(gfx.render_debug_text(
             format!("Num Events: {:.2}", num_events).as_str(),
             10.0,
             510.0,
         ));
 
-        or_die(sdl::render_present(&gfx));
+        or_die(gfx.render_present());
 
         // ::std::thread::sleep(
         //     Duration::new(0, 1_000_000_000u32 / 60)

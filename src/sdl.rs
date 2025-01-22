@@ -15,16 +15,20 @@ pub struct Gfx {
     renderer: *mut SDL_Renderer,
 }
 
+fn ok_or_err(is_ok: bool) -> Result<(), String> {
+    if is_ok {
+        Ok(())
+    } else {
+        Err(get_error())
+    }
+}
+
 fn get_error() -> String {
     unsafe { CStr::from_ptr(SDL_GetError()).to_string_lossy().to_string() }
 }
 
 pub fn init(flags: SDL_InitFlags) -> Result<(), String> {
-    if unsafe { SDL_Init(flags) } {
-        Ok(())
-    } else {
-        Err(get_error())
-    }
+    ok_or_err(unsafe { SDL_Init(flags) })
 }
 
 pub fn quit() {
@@ -62,52 +66,42 @@ pub fn create_window_and_renderer(
     }
 }
 
-// todo make into trait with gfx as self?
-pub fn set_render_draw_color(gfx: &Gfx, r: u8, g: u8, b: u8, a: u8) -> Result<(), String> {
-    if unsafe { SDL_SetRenderDrawColor(gfx.renderer, r, g, b, a) } {
-        Ok(())
-    } else {
-        Err(get_error())
+impl Gfx {
+    pub fn set_render_draw_color(&self, r: u8, g: u8, b: u8, a: u8) -> Result<(), String> {
+        ok_or_err(unsafe { SDL_SetRenderDrawColor(self.renderer, r, g, b, a) })
     }
-}
 
-pub fn render_clear(gfx: &Gfx) -> Result<(), String> {
-    if unsafe { SDL_RenderClear(gfx.renderer) } {
-        Ok(())
-    } else {
-        Err(get_error())
+    pub fn render_clear(&self) -> Result<(), String> {
+        ok_or_err(unsafe { SDL_RenderClear(self.renderer) })
     }
-}
 
-pub fn render_fill_rect(gfx: &Gfx, rect: &SDL_FRect) -> Result<(), String> {
-    if unsafe { SDL_RenderFillRect(gfx.renderer, rect) } {
-        Ok(())
-    } else {
-        Err(get_error())
+    pub fn render_fill_rect(&self, rect: &SDL_FRect) -> Result<(), String> {
+        ok_or_err(unsafe { SDL_RenderFillRect(self.renderer, rect) })
     }
-}
 
-pub fn render_line(gfx: &Gfx, x1: f32, y1: f32, x2: f32, y2: f32) -> Result<(), String> {
-    if unsafe { SDL_RenderLine(gfx.renderer, x1, y1, x2, y2) } {
-        Ok(())
-    } else {
-        Err(get_error())
+    pub fn render_line(&self, x1: f32, y1: f32, x2: f32, y2: f32) -> Result<(), String> {
+        ok_or_err(unsafe { SDL_RenderLine(self.renderer, x1, y1, x2, y2) })
     }
-}
 
-pub fn render_present(gfx: &Gfx) -> Result<(), String> {
-    if unsafe { SDL_RenderPresent(gfx.renderer) } {
-        Ok(())
-    } else {
-        Err(get_error())
+    pub fn render_present(&self) -> Result<(), String> {
+        ok_or_err(unsafe { SDL_RenderPresent(self.renderer) })
     }
-}
 
-pub fn set_render_vsync(gfx: &Gfx, vsync: i32) -> Result<(), String> {
-    if unsafe { SDL_SetRenderVSync(gfx.renderer, vsync) } {
-        Ok(())
-    } else {
-        Err(get_error())
+    pub fn set_render_vsync(&self, vsync: i32) -> Result<(), String> {
+        ok_or_err(unsafe { SDL_SetRenderVSync(self.renderer, vsync) })
+    }
+
+    pub fn render_debug_text(&self, text: &str, x: f32, y: f32) -> Result<(), String> {
+        ok_or_err(unsafe {
+            SDL_RenderDebugText(
+                self.renderer,
+                x,
+                y,
+                CString::new(text)
+                    .expect("debug text to be converted to CString")
+                    .as_ptr(),
+            )
+        })
     }
 }
 
@@ -176,19 +170,11 @@ pub fn bind_audio_stream(
     id: SDL_AudioDeviceID,
     stream: *mut SDL_AudioStream,
 ) -> Result<(), String> {
-    if unsafe { SDL_BindAudioStream(id, stream) } {
-        Ok(())
-    } else {
-        Err(get_error())
-    }
+    ok_or_err(unsafe { SDL_BindAudioStream(id, stream) })
 }
 
 pub fn flush_audio_stream(stream: *mut SDL_AudioStream) -> Result<(), String> {
-    if unsafe { SDL_FlushAudioStream(stream) } {
-        Ok(())
-    } else {
-        Err(get_error())
-    }
+    ok_or_err(unsafe { SDL_FlushAudioStream(stream) })
 }
 
 // get all samples of pending audio
@@ -218,18 +204,6 @@ pub fn get_audio_stream_data_i32(stream: *mut SDL_AudioStream) -> Result<Vec<i32
     }
 
     Ok(samples)
-}
-
-pub fn render_debug_text(gfx: &Gfx, text: &str, x: f32, y: f32) -> Result<(), String> {
-    if unsafe {
-        SDL_RenderDebugText(gfx.renderer, x, y, CString::new(text)
-            .expect("debug text to be converted to CString")
-            .as_ptr())
-    } {
-        Ok(())
-    } else {
-        Err(get_error())
-    }
 }
 
 #[allow(dead_code)]
@@ -278,7 +252,11 @@ pub fn poll_event() -> Option<Event> {
     if unsafe { SDL_PollEvent(&mut event) } {
         match SDL_EventType(unsafe { event.r#type }) {
             SDL_EventType::QUIT => Some(Event::Quit(unsafe { event.quit })),
-            SDL_EventType::WINDOW_RESIZED => Some(Event::Window( SDL_EventType::WINDOW_RESIZED, unsafe { event.window })),
+            SDL_EventType::WINDOW_RESIZED => {
+                Some(Event::Window(SDL_EventType::WINDOW_RESIZED, unsafe {
+                    event.window
+                }))
+            }
             _ => Some(Event::User(unsafe { event.user })), // dummy event so we can decern an unimplemented event (in this function) from NO event
         }
     } else {
