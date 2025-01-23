@@ -65,12 +65,36 @@ fn or_die(result: Result<(), String>) {
 // todo capture and log panics/backtraces
 // todo replace flacenc with reference libFLAC ffi encoder due to quality concerns (author has not maintained library recently, noticed missing metadata when looking at file in nautilus right click menu, one program failed to load these flac files (sound converter), and there was at least one instance where audio was saved distorted)
 
+#[derive(Debug, PartialEq)]
+enum ExistingFileStrategy {
+    RenameToLast,
+    RenameToFirst,
+    Append,
+    Replace,
+    Ask,
+}
+
+impl FromStr for ExistingFileStrategy {
+    type Err = ();
+    fn from_str(s: &str) -> Result<ExistingFileStrategy, ()> {
+        match s {
+            "rename-to-last" => Ok(ExistingFileStrategy::RenameToLast),
+            "rename-to-first" => Ok(ExistingFileStrategy::RenameToFirst),
+            "append" => Ok(ExistingFileStrategy::Append),
+            "replace" => Ok(ExistingFileStrategy::Replace),
+            "ask" => Ok(ExistingFileStrategy::Ask),
+            _ => Err(()),
+        }
+    }
+}
+
 struct ProgramConfig {
     interface: String, // search string for the audio interface to use
     window_width: u32,
     window_height: u32,
     log_file: String,
     log_level: String,
+    existing_file_strategy: ExistingFileStrategy,
 }
 
 impl ProgramConfig {
@@ -91,12 +115,17 @@ impl ProgramConfig {
             .unwrap_or(String::from("audioSidecar.log"));
         let log_level: String = settings.get("LogLevel").unwrap_or(String::from("debug"));
 
+        let existing_file_strategy =
+            ExistingFileStrategy::from_str(settings.get("ExistingFileStrategy").unwrap_or(String::from("")).as_str())
+                .unwrap_or(ExistingFileStrategy::RenameToLast);
+
         Ok(ProgramConfig {
             interface,
             window_width,
             window_height,
             log_file,
             log_level,
+            existing_file_strategy,
         })
     }
 }
@@ -357,7 +386,13 @@ pub fn main() {
                     }
                 }
                 Event::Quit(_) => {
-                    save_and_quit(filepath, logical_interface_id, audio_stream, &mut recorded_audio);
+                    save_and_quit(
+                        filepath,
+                        logical_interface_id,
+                        audio_stream,
+                        &mut recorded_audio,
+                        &config,
+                    );
                 }
                 _ => continue,
             }
@@ -426,22 +461,6 @@ pub fn main() {
             true,
         );
 
-        // or_die(gfx.set_render_scale(3.0, 3.0));
-        // or_die(
-        //     gfx.render_debug_text(
-        //         format!(
-        //             "Record Time: {}",
-        //             format_duration(Duration::from_secs_f64(
-        //                 recorded_audio.len() as f64 / 44100.0,
-        //             ))
-        //         )
-        //         .as_str(),
-        //         (BORDER_SIZE + 4.0) / 3.0,
-        //         (window_height as f32 - 100.0 + (100.0 / 2.0) - 8.0) / 3.0,
-        //     ),
-        // );
-        // or_die(gfx.set_render_scale(1.0, 1.0));
-
         let button_width = 300.0;
         let button_height = 100.0 - BORDER_SIZE * 3.0;
         if button(
@@ -456,14 +475,26 @@ pub fn main() {
             clicking,
         ) {
             info!("pressed save audio button");
-            save_and_quit(filepath, logical_interface_id, audio_stream, &mut recorded_audio);
+            save_and_quit(
+                filepath,
+                logical_interface_id,
+                audio_stream,
+                &mut recorded_audio,
+                &config,
+            );
         }
 
         or_die(gfx.render_present());
     }
 }
 
-fn save_and_quit(filepath: &Path, logical_interface_id: SDL_AudioDeviceID, audio_stream: *mut SDL_AudioStream, recorded_audio: &mut Vec<i32>) {
+fn save_and_quit(
+    filepath: &Path,
+    logical_interface_id: SDL_AudioDeviceID,
+    audio_stream: *mut SDL_AudioStream,
+    recorded_audio: &mut Vec<i32>,
+    config: &ProgramConfig,
+) {
     info!("Shutdown triggered");
 
     debug!("Capturing final audio samples...");
@@ -491,7 +522,7 @@ fn save_and_quit(filepath: &Path, logical_interface_id: SDL_AudioDeviceID, audio
 
     // save flac audio
     let (channels, bits_per_sample, sample_rate) = (1, 24, 44100);
-    let config = flacenc::config::Encoder::default()
+    let flac_config = flacenc::config::Encoder::default()
         .into_verified()
         .expect("Config data error.");
     let source = flacenc::source::MemSource::from_samples(
@@ -501,7 +532,7 @@ fn save_and_quit(filepath: &Path, logical_interface_id: SDL_AudioDeviceID, audio
         sample_rate,
     );
     let flac_stream =
-        flacenc::encode_with_fixed_block_size(&config, source, config.block_size)
+        flacenc::encode_with_fixed_block_size(&flac_config, source, flac_config.block_size)
             .expect("Encode failed.");
 
     debug!("Saving audio to disk...");
@@ -512,15 +543,47 @@ fn save_and_quit(filepath: &Path, logical_interface_id: SDL_AudioDeviceID, audio
     flac_stream.write(&mut sink).expect("TODO: panic message");
 
     // Then, e.g. you can write it to a file.
-    let filename = filepath
+    let filename_base = filepath
         .with_extension("")
         .file_name()
         .expect("filename should be non-empty")
         .to_string_lossy()
         .to_string();
-    let filename = filename + "_audio.flac";
+    let filename = filename_base.clone() + "_audio.flac";
 
-    let outputfile = filepath.with_file_name(filename);
+    let mut outputfile = filepath.with_file_name(filename);
+
+    if std::fs::exists(&outputfile).unwrap_or(true) {
+        // fail safely, assume conflict if can't determine
+        // todo handle exists() io failure and logging explicitly
+        info!("File exists at \"{}\"", outputfile.display());
+
+        match config.existing_file_strategy {
+            ExistingFileStrategy::RenameToLast => {
+                let mut n = 1;
+                let mut tries = 100; //give up after 100 tries to avoid infinite loop
+                while std::fs::exists(&outputfile).unwrap_or(true) {
+                    n += 1;
+                    tries -= 1;
+                    outputfile = filepath.with_file_name(
+                        filename_base.clone() + format!("_audio{}.flac", n).as_str(),
+                    );
+                    if tries <= 0 {
+                        error!("Failed to find next file name in 100 tries. Continuing.");
+                        break;
+                    }
+                }
+            }
+            ExistingFileStrategy::Replace => {
+                // do nothing, the file will be replaced on save
+                // todo, move to trash or something first
+            }
+            _ => todo!(),
+        }
+    }
+
+    info!("Saving audio to \"{}\"", outputfile.display());
+
     std::fs::write(outputfile, sink.as_slice()).expect("Failed to write flac");
 
     info!("Audio saved");
