@@ -221,8 +221,8 @@ pub enum Event {
     EditCandidates(SDL_TextEditingCandidatesEvent),
     Text(SDL_TextInputEvent),
     MDevice(SDL_MouseDeviceEvent),
-    Motion(SDL_MouseMotionEvent),
-    Button(SDL_MouseButtonEvent),
+    Motion(SDL_EventType, SDL_MouseMotionEvent),
+    Button(SDL_EventType, SDL_MouseButtonEvent),
     Wheel(SDL_MouseWheelEvent),
     JDevice(SDL_JoyDeviceEvent),
     JAxis(SDL_JoyAxisEvent),
@@ -259,6 +259,21 @@ pub fn poll_event() -> Option<Event> {
             SDL_EventType::WINDOW_RESIZED => {
                 Some(Event::Window(SDL_EventType::WINDOW_RESIZED, unsafe {
                     event.window
+                }))
+            }
+            SDL_EventType::MOUSE_MOTION => {
+                Some(Event::Motion(SDL_EventType::MOUSE_MOTION, unsafe {
+                    event.motion
+                }))
+            }
+            SDL_EventType::MOUSE_BUTTON_DOWN => {
+                Some(Event::Button(SDL_EventType::MOUSE_BUTTON_DOWN, unsafe {
+                    event.button
+                }))
+            }
+            SDL_EventType::MOUSE_BUTTON_UP => {
+                Some(Event::Button(SDL_EventType::MOUSE_BUTTON_UP, unsafe {
+                    event.button
                 }))
             }
             _ => Some(Event::User(unsafe { event.user })), // dummy event so we can decern an unimplemented event (in this function) from NO event

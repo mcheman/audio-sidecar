@@ -24,6 +24,10 @@ ExistingFileStrategy = "replace"
 WindowWidth = 800
 WindowHeight = 400
 
+# Specify a sound to be played when saving is successful to have a positive indicator rather than the window just disappearing
+# Disabled by default
+# SaveSound = "success.wav"
+
 # Path to the log file to use
 #
 LogFile = "as.log"

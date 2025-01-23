@@ -62,6 +62,8 @@ fn or_die(result: Result<(), String>) {
 
 // todo try to select the first audio input, or test both inputs to see which has any audio signal and use that one
 // todo display a user facing message about needing to turn the audio interface on/plug in if it isn't detected
+// todo capture and log panics/backtraces
+// todo replace flacenc with reference libFLAC ffi encoder due to quality concerns (author has not maintained library recently, noticed missing metadata when looking at file in nautilus right click menu, one program failed to load these flac files (sound converter), and there was at least one instance where audio was saved distorted)
 
 struct ProgramConfig {
     interface: String, // search string for the audio interface to use
@@ -155,6 +157,73 @@ fn draw_waveform(gfx: &Gfx, waveform: &[u32], x: f32, y: f32, width: f32, height
             or_die(gfx.set_render_draw_color(255, 255, 255, 255));
         }
     }
+}
+
+fn draw_text(gfx: &Gfx, text: &str, x: f32, y: f32, size: f32, centered_x: bool, centered_y: bool) {
+    or_die(gfx.set_render_scale(size, size));
+
+    const GLYPH_SIZE: f32 = 8.0;
+
+    let offset_x = if centered_x {
+        (text.len() as f32 * GLYPH_SIZE) / 2.0
+    } else {
+        0.0
+    };
+    let offset_y = if centered_y { GLYPH_SIZE / 2.0 } else { 0.0 };
+
+    or_die(gfx.render_debug_text(text, x / size - offset_x, y / size - offset_y));
+
+    or_die(gfx.set_render_scale(1.0, 1.0));
+}
+
+// returns true if button is currently clicked
+fn button(
+    gfx: &Gfx,
+    text: &str,
+    x: f32,
+    y: f32,
+    width: f32,
+    height: f32,
+    mouse_x: f32,
+    mouse_y: f32,
+    clicked: bool,
+) -> bool {
+    let mouse_colliding = mouse_x > x && mouse_x < x + width && mouse_y > y && mouse_y < y + height;
+
+    if mouse_colliding && clicked {
+        or_die(gfx.set_render_draw_color(20, 20, 20, 255));
+    } else if mouse_colliding {
+        // hover state
+        or_die(gfx.set_render_draw_color(80, 90, 90, 255));
+    } else {
+        or_die(gfx.set_render_draw_color(80, 80, 80, 255));
+    }
+
+    let rect = SDL_FRect {
+        x,
+        y,
+        w: width,
+        h: height,
+    };
+
+    or_die(gfx.render_fill_rect(&rect));
+
+    // button text
+    or_die(gfx.set_render_draw_color(255, 255, 255, 255));
+
+    draw_text(
+        &gfx,
+        text,
+        x + width / 2.0,
+        y + height / 2.0,
+        3.0,
+        true,
+        true,
+    );
+
+    // todo only emit click when mouse button is released
+
+    mouse_colliding && clicked
 }
 
 pub fn main() {
@@ -257,6 +326,10 @@ pub fn main() {
     let mut display_waveform: Vec<u32> = Vec::new();
     let mut previous_unchunked_samples: Vec<i32> = Vec::new();
 
+    let mut clicking = false;
+    let mut mouse_x: f32 = 0.0;
+    let mut mouse_y: f32 = 0.0;
+
     loop {
         // poll until all events are handled and the queue runs dry
         let mut num_events = 0;
@@ -270,73 +343,21 @@ pub fn main() {
                         window_height = e.data2 as u32;
                     }
                 }
+                Event::Button(event_type, e) => {
+                    if event_type == SDL_EventType::MOUSE_BUTTON_DOWN {
+                        clicking = true;
+                    } else if event_type == SDL_EventType::MOUSE_BUTTON_UP {
+                        clicking = false;
+                    }
+                }
+                Event::Motion(event_type, e) => {
+                    if event_type == SDL_EventType::MOUSE_MOTION {
+                        mouse_x = e.x;
+                        mouse_y = e.y;
+                    }
+                }
                 Event::Quit(_) => {
-                    info!("Shutdown triggered");
-
-                    debug!("Capturing final audio samples...");
-
-                    if let Err(msg) = sdl::flush_audio_stream(audio_stream) {
-                        die(format!("SDL could not flush audio stream: {}", msg).as_str());
-                    }
-                    sdl::close_audio_device(logical_interface_id);
-
-                    // get last bit of audio
-                    let mut samples = match sdl::get_audio_stream_data_i32(audio_stream) {
-                        Ok(s) => s,
-                        Err(msg) => die(format!("SDL GetAudioStreamData failed: {}", msg).as_str()),
-                    };
-                    // clip audio to 24 bits by removing quietest 8 bits
-                    for s in samples.iter_mut() {
-                        *s >>= 8;
-                    }
-
-                    recorded_audio.append(&mut samples);
-
-                    debug!("Encoding audio...");
-
-                    //sdl::quit(); // todo hide window while audio exports so it looks immediate? alternately show a progress bar?
-
-                    // save flac audio
-                    let (channels, bits_per_sample, sample_rate) = (1, 24, 44100);
-                    let config = flacenc::config::Encoder::default()
-                        .into_verified()
-                        .expect("Config data error.");
-                    let source = flacenc::source::MemSource::from_samples(
-                        recorded_audio.as_slice(),
-                        channels,
-                        bits_per_sample,
-                        sample_rate,
-                    );
-                    let flac_stream =
-                        flacenc::encode_with_fixed_block_size(&config, source, config.block_size)
-                            .expect("Encode failed.");
-
-                    debug!("Saving audio to disk...");
-
-                    // `Stream` implements `BitRepr` so you can obtain the encoded stream via
-                    // `ByteSink` struct that implements `BitSink`.
-                    let mut sink = flacenc::bitsink::ByteSink::new();
-                    flac_stream.write(&mut sink).expect("TODO: panic message");
-
-                    // Then, e.g. you can write it to a file.
-                    let filename = filepath
-                        .with_extension("")
-                        .file_name()
-                        .expect("filename should be non-empty")
-                        .to_string_lossy()
-                        .to_string();
-                    let filename = filename + "_audio.flac";
-
-                    let outputfile = filepath.with_file_name(filename);
-                    std::fs::write(outputfile, sink.as_slice()).expect("Failed to write flac");
-
-                    info!("Audio saved");
-
-                    sdl::quit();
-
-                    info!("============= Exited =============");
-
-                    exit(0);
+                    save_and_quit(filepath, logical_interface_id, audio_stream, &mut recorded_audio);
                 }
                 _ => continue,
             }
@@ -389,22 +410,124 @@ pub fn main() {
             window_height as f32 - 100.0,
         );
 
-        or_die(gfx.set_render_scale(3.0, 3.0));
-        or_die(
-            gfx.render_debug_text(
-                format!(
-                    "Record Time: {}",
-                    format_duration(Duration::from_secs_f64(
-                        recorded_audio.len() as f64 / 44100.0,
-                    ))
-                )
-                .as_str(),
-                (BORDER_SIZE + 4.0) / 3.0,
-                (window_height as f32 - 100.0 + (100.0 / 2.0) - 8.0) / 3.0,
-            ),
+        draw_text(
+            &gfx,
+            format!(
+                "Record Time: {}",
+                format_duration(Duration::from_secs_f64(
+                    recorded_audio.len() as f64 / 44100.0,
+                ))
+            )
+            .as_str(),
+            BORDER_SIZE,
+            window_height as f32 - (100.0 - BORDER_SIZE) / 2.0,
+            3.0,
+            false,
+            true,
         );
-        or_die(gfx.set_render_scale(1.0, 1.0));
+
+        // or_die(gfx.set_render_scale(3.0, 3.0));
+        // or_die(
+        //     gfx.render_debug_text(
+        //         format!(
+        //             "Record Time: {}",
+        //             format_duration(Duration::from_secs_f64(
+        //                 recorded_audio.len() as f64 / 44100.0,
+        //             ))
+        //         )
+        //         .as_str(),
+        //         (BORDER_SIZE + 4.0) / 3.0,
+        //         (window_height as f32 - 100.0 + (100.0 / 2.0) - 8.0) / 3.0,
+        //     ),
+        // );
+        // or_die(gfx.set_render_scale(1.0, 1.0));
+
+        let button_width = 300.0;
+        let button_height = 100.0 - BORDER_SIZE * 3.0;
+        if button(
+            &gfx,
+            "Save Audio",
+            window_width as f32 - BORDER_SIZE - button_width,
+            window_height as f32 - BORDER_SIZE - button_height,
+            button_width,
+            button_height,
+            mouse_x,
+            mouse_y,
+            clicking,
+        ) {
+            info!("pressed save audio button");
+            save_and_quit(filepath, logical_interface_id, audio_stream, &mut recorded_audio);
+        }
 
         or_die(gfx.render_present());
     }
+}
+
+fn save_and_quit(filepath: &Path, logical_interface_id: SDL_AudioDeviceID, audio_stream: *mut SDL_AudioStream, recorded_audio: &mut Vec<i32>) {
+    info!("Shutdown triggered");
+
+    debug!("Capturing final audio samples...");
+
+    if let Err(msg) = sdl::flush_audio_stream(audio_stream) {
+        die(format!("SDL could not flush audio stream: {}", msg).as_str());
+    }
+    sdl::close_audio_device(logical_interface_id);
+
+    // get last bit of audio
+    let mut samples = match sdl::get_audio_stream_data_i32(audio_stream) {
+        Ok(s) => s,
+        Err(msg) => die(format!("SDL GetAudioStreamData failed: {}", msg).as_str()),
+    };
+    // clip audio to 24 bits by removing quietest 8 bits
+    for s in samples.iter_mut() {
+        *s >>= 8;
+    }
+
+    recorded_audio.append(&mut samples);
+
+    debug!("Encoding audio...");
+
+    //sdl::quit(); // todo hide window while audio exports so it looks immediate? alternately show a progress bar?
+
+    // save flac audio
+    let (channels, bits_per_sample, sample_rate) = (1, 24, 44100);
+    let config = flacenc::config::Encoder::default()
+        .into_verified()
+        .expect("Config data error.");
+    let source = flacenc::source::MemSource::from_samples(
+        recorded_audio.as_slice(),
+        channels,
+        bits_per_sample,
+        sample_rate,
+    );
+    let flac_stream =
+        flacenc::encode_with_fixed_block_size(&config, source, config.block_size)
+            .expect("Encode failed.");
+
+    debug!("Saving audio to disk...");
+
+    // `Stream` implements `BitRepr` so you can obtain the encoded stream via
+    // `ByteSink` struct that implements `BitSink`.
+    let mut sink = flacenc::bitsink::ByteSink::new();
+    flac_stream.write(&mut sink).expect("TODO: panic message");
+
+    // Then, e.g. you can write it to a file.
+    let filename = filepath
+        .with_extension("")
+        .file_name()
+        .expect("filename should be non-empty")
+        .to_string_lossy()
+        .to_string();
+    let filename = filename + "_audio.flac";
+
+    let outputfile = filepath.with_file_name(filename);
+    std::fs::write(outputfile, sink.as_slice()).expect("Failed to write flac");
+
+    info!("Audio saved");
+
+    sdl::quit();
+
+    info!("============= Exited =============");
+
+    exit(0);
 }
