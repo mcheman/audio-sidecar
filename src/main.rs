@@ -35,7 +35,7 @@ fn or_die(result: Result<(), String>) {
 // todo copious error checking
 // todo save performance stats and/or performance stats outside of normal
 // todo if audio is for an image, load a thumbnail and display it so it's clearer which file the audio will be associated with. Loading thumbnails rather than the image itself should be both faster and have fewer file formats to deal with. We could even try to load _any_ thumbnail that matches the file in question, say for video files, since we'll only care if there _is_ one. See https://askubuntu.com/questions/1368910/how-to-create-custom-thumbnailers-for-nautilus-nemo-and-caja and https://specifications.freedesktop.org/thumbnail-spec/latest/thumbsave.html
-// todo Audio should be saved periodically to some temporary location and always on quit in case the wrong button is pressed. Potentially, the audio could be moved to trash if the X button was clicked, rather than save. Or use hidden files, but what would clean them up?
+// todo Audio should be saved periodically to some temporary location (or merely the final desired location!) and always on quit in case the wrong button is pressed. Potentially, the audio could be moved to trash if the X button was clicked, rather than save. Or use hidden files, but what would clean them up?
 // todo MVP should ONLY record at end of existing audio.
 
 // todo add error checking, logging, and dad friendly error reporting
@@ -64,6 +64,9 @@ fn or_die(result: Result<(), String>) {
 // todo display a user facing message about needing to turn the audio interface on/plug in if it isn't detected
 // todo capture and log panics/backtraces
 // todo replace flacenc with reference libFLAC ffi encoder due to quality concerns (author has not maintained library recently, noticed missing metadata when looking at file in nautilus right click menu, one program failed to load these flac files (sound converter), and there was at least one instance where audio was saved distorted)
+// todo analyze the audio recorded so far and if its max amplitude (when excluding a few outliers??? like loud pops?) is too low, show a message to raise the gain. Similarly, if clipping regularly, show message asking to lower gain
+// todo rearrange code so as much as possible can be tested via test runners
+
 
 #[derive(Debug, PartialEq)]
 enum ExistingFileStrategy {
@@ -278,6 +281,7 @@ pub fn main() {
 
     info!("============= Started =============");
 
+
     let args: Vec<String> = env::args().collect();
 
     let defaultpath = String::from("/tmp/test.png");
@@ -350,6 +354,8 @@ pub fn main() {
         die(format!("SDL could not bind logical audio device to stream: {}", msg).as_str());
     }
 
+
+
     let mut recorded_audio: Vec<i32> = Vec::new();
 
     let mut display_waveform: Vec<u32> = Vec::new();
@@ -387,6 +393,7 @@ pub fn main() {
                 }
                 Event::Quit(_) => {
                     save_and_quit(
+                        &gfx,
                         filepath,
                         logical_interface_id,
                         audio_stream,
@@ -476,6 +483,7 @@ pub fn main() {
         ) {
             info!("pressed save audio button");
             save_and_quit(
+                &gfx,
                 filepath,
                 logical_interface_id,
                 audio_stream,
@@ -489,6 +497,7 @@ pub fn main() {
 }
 
 fn save_and_quit(
+    gfx: &Gfx,
     filepath: &Path,
     logical_interface_id: SDL_AudioDeviceID,
     audio_stream: *mut SDL_AudioStream,
@@ -587,6 +596,15 @@ fn save_and_quit(
     std::fs::write(outputfile, sink.as_slice()).expect("Failed to write flac");
 
     info!("Audio saved");
+    gfx.hide_window();
+
+    let success_sound = match sdl::loadwav("success.wav") {
+        Ok(a) => a,
+        Err(msg) => die(format!("SDL Failed to load wav: {}", msg).as_str()),
+    };
+
+    debug!("Playing success sound...");
+    sdl::play_sound(&success_sound);
 
     sdl::quit();
 

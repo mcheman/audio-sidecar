@@ -1,8 +1,8 @@
 use sdl3_sys::everything::*;
 use sdl3_sys::init::SDL_InitFlags;
 use std::cmp::min;
-use std::ffi::{CStr, CString};
-use std::ptr;
+use std::ffi::{c_uint, c_void, CStr, CString};
+use std::{ptr, slice};
 
 const AUDIO_SPEC: SDL_AudioSpec = SDL_AudioSpec {
     channels: 1,
@@ -107,11 +107,73 @@ impl Gfx {
     pub fn set_render_scale(&self, x_scale: f32, y_scale: f32) -> Result<(), String> {
         ok_or_err(unsafe { SDL_SetRenderScale(self.renderer, x_scale, y_scale) })
     }
+
+    pub fn hide_window(&self) { // todo handle return value
+        unsafe { SDL_HideWindow(self.window); }
+    }
 }
 
 pub struct AudioDevice {
     pub id: SDL_AudioDeviceID,
     pub name: String,
+}
+
+pub struct Sound {
+    audio_spec: SDL_AudioSpec,
+    data: Vec<i32>,
+}
+
+pub fn loadwav(path: &str) -> Result<Sound, String> {
+    // will be overwritten by SDL_LoadWAV()
+    let mut spec = SDL_AudioSpec {
+        format: SDL_AUDIO_S32,
+        channels: 1,
+        freq: 44100,
+    };
+
+    let mut audio_buffer: *mut Uint8 = ptr::null_mut();
+    let mut audio_len: u32 = 0;
+
+    if unsafe {
+        SDL_LoadWAV(
+            CString::new(path)
+                .expect("path to be converted to CString")
+                .as_ptr(),
+            &mut spec,
+            &mut audio_buffer,
+            &mut audio_len,
+        )
+    } {
+        // todo this is hardcore assuming the wav will be encoded as i32 samples and will fail horribly if that's not the case
+        let num_samples = audio_len as usize / 4;
+        let mut data = Vec::with_capacity(num_samples);
+        for i in 0..num_samples {
+            data.push(unsafe { *(audio_buffer as *mut i32).wrapping_add(i) });
+        }
+        unsafe { SDL_free(audio_buffer.cast()) };
+
+        Ok(Sound {
+            audio_spec: spec,
+            data,
+        })
+    } else {
+        Err(get_error())
+    }
+}
+
+// todo this level of abstraction does not belong here, also fix the safety
+pub fn play_sound(sound: &Sound) {
+    unsafe {
+        let stream = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &sound.audio_spec, SDL_AudioStreamCallback::None, ptr::null_mut());
+        SDL_PutAudioStreamData(stream, sound.data.as_ptr().cast(), (sound.data.len() * 4) as i32);
+        SDL_SetAudioStreamGain(stream, 0.2);
+        SDL_ResumeAudioStreamDevice(stream);
+
+        let seconds = sound.data.len() as f64 / 44100.0;
+
+        std::thread::sleep(std::time::Duration::from_secs_f64(seconds));
+
+    }
 }
 
 pub fn get_audio_recording_devices() -> Result<Vec<AudioDevice>, String> {

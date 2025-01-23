@@ -17,11 +17,12 @@ AutoRecord = "on"
 #        ask: prompt the user for the behavior they want
 #
 ExistingFileStrategy = "replace"
+#ExistingFileStrategy = "rename-to-last"
 
 # Specify the size of the window. All elements are scaled appropriately.
 # WindowSize <width>x<height>
 #
-WindowWidth = 800
+WindowWidth = 1000
 WindowHeight = 400
 
 # Specify a sound to be played when saving is successful to have a positive indicator rather than the window just disappearing
