@@ -5,7 +5,7 @@ use crate::sdl::{Event, Gfx};
 use config::{Config, FileFormat};
 use flacenc::component::BitRepr;
 use flacenc::error::Verify;
-use log::{error, info};
+use log::{debug, error, info};
 use sdl3_sys::everything::*;
 use std::cmp::max;
 use std::path::Path;
@@ -178,13 +178,13 @@ pub fn main() {
         );
     subscriber.init();
 
-    info!("Program starting");
+    info!("============= Started =============");
 
     let args: Vec<String> = env::args().collect();
 
     let defaultpath = String::from("/tmp/test.png");
     let filepath = Path::new(args.get(1).unwrap_or(&defaultpath));
-    info!("Using input file: {:?}", filepath);
+    info!("Audio associated with file: {:?}", filepath);
 
     if let Err(msg) = sdl::init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_EVENTS) {
         die(format!("SDL initialization failed: {}", msg).as_str());
@@ -219,7 +219,7 @@ pub fn main() {
     let mut desired_interface_id = SDL_AUDIO_DEVICE_DEFAULT_RECORDING;
 
     info!(
-        "Found {} Audio Devices:    [Matching on \"{}\"]",
+        "Found {} Audio Devices:    (Matching on \"{}\")",
         recording_devices.len(),
         config.interface
     );
@@ -264,7 +264,6 @@ pub fn main() {
             num_events += 1;
             match event {
                 // todo New events will have to be added both here and in sdl::poll_event()
-                // todo check timestamp of event and compare to time to see how much elapsed between when X was clicked and when the event finally got handled to debug the slow close
                 Event::Window(event_type, e) => {
                     if event_type == SDL_EventType::WINDOW_RESIZED {
                         window_width = e.data1 as u32;
@@ -272,7 +271,9 @@ pub fn main() {
                     }
                 }
                 Event::Quit(_) => {
-                    info!("Shutting down");
+                    info!("Shutdown triggered");
+
+                    debug!("Capturing final audio samples...");
 
                     if let Err(msg) = sdl::flush_audio_stream(audio_stream) {
                         die(format!("SDL could not flush audio stream: {}", msg).as_str());
@@ -291,11 +292,12 @@ pub fn main() {
 
                     recorded_audio.append(&mut samples);
 
+                    debug!("Encoding audio...");
+
                     //sdl::quit(); // todo hide window while audio exports so it looks immediate? alternately show a progress bar?
 
                     // save flac audio
-                    // todo ensure multithreaded and find out which compression level is used, seems like it defaults to max and it can't be adjusted???
-                    let (channels, bits_per_sample, sample_rate) = (1, 24, 96000);
+                    let (channels, bits_per_sample, sample_rate) = (1, 24, 44100);
                     let config = flacenc::config::Encoder::default()
                         .into_verified()
                         .expect("Config data error.");
@@ -309,19 +311,31 @@ pub fn main() {
                         flacenc::encode_with_fixed_block_size(&config, source, config.block_size)
                             .expect("Encode failed.");
 
+                    debug!("Saving audio to disk...");
+
                     // `Stream` implements `BitRepr` so you can obtain the encoded stream via
                     // `ByteSink` struct that implements `BitSink`.
                     let mut sink = flacenc::bitsink::ByteSink::new();
                     flac_stream.write(&mut sink).expect("TODO: panic message");
 
                     // Then, e.g. you can write it to a file.
-                    // todo add string at end of filename, before extension, so the audio sidecar sorts after the file
-                    let outputfile = filepath.with_extension("flac");
+                    let filename = filepath
+                        .with_extension("")
+                        .file_name()
+                        .expect("filename should be non-empty")
+                        .to_string_lossy()
+                        .to_string();
+                    let filename = filename + "_audio.flac";
+
+                    let outputfile = filepath.with_file_name(filename);
                     std::fs::write(outputfile, sink.as_slice()).expect("Failed to write flac");
 
-                    info!("Audio output written");
+                    info!("Audio saved");
 
                     sdl::quit();
+
+                    info!("============= Exited =============");
+
                     exit(0);
                 }
                 _ => continue,

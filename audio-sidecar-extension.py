@@ -24,7 +24,7 @@ class AudioSidecarExtension(GObject.GObject, Nautilus.MenuProvider):
             file: Nautilus.FileInfo,
     ) -> None:
         subprocess.Popen(
-            ['/speed/programs/audio-sidecar/target/debug/audio_sidecar', file.get_location().get_path()],
+            ['/speed/programs/audio-sidecar/target/release/audio_sidecar', file.get_location().get_path()],
             cwd='/speed/programs/audio-sidecar/')
 
     def get_file_items(
