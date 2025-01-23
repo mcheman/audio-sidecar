@@ -6,7 +6,7 @@ Interface = "input 1"
 
 # Enable auto record when program is launched
 #     AutoRecord = on | off
-AutoRecord = "off"
+AutoRecord = "on"
 
 # Specify how to deal with a file that already has an audio sidecar
 #     ExistingFileStrategy rename-to-last | rename-to-first | replace | append | ask
@@ -21,8 +21,8 @@ ExistingFileStrategy = "replace"
 # Specify the size of the window. All elements are scaled appropriately.
 # WindowSize <width>x<height>
 #
-WindowWidth = 300
-WindowHeight = 600
+WindowWidth = 800
+WindowHeight = 400
 
 # Path to the log file to use
 #

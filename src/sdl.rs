@@ -1,7 +1,7 @@
 use sdl3_sys::everything::*;
 use sdl3_sys::init::SDL_InitFlags;
 use std::cmp::min;
-use std::ffi::{c_int, CStr, CString};
+use std::ffi::{CStr, CString};
 use std::ptr;
 
 const AUDIO_SPEC: SDL_AudioSpec = SDL_AudioSpec {
@@ -187,7 +187,7 @@ pub fn get_audio_stream_data_i32(stream: *mut SDL_AudioStream) -> Result<Vec<i32
     let mut samples = Vec::with_capacity(1024);
 
     let mut sample_buffer = [0i32; 1024];
-    let buffer_bytes = (sample_buffer.len() * 4) as c_int;
+    let buffer_bytes = (sample_buffer.len() * 4) as i32;
 
     loop {
         let bytes_read = unsafe {

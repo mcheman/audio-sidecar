@@ -1,7 +1,7 @@
 extern crate flacenc;
 extern crate sdl3_sys;
 
-use crate::sdl::Event;
+use crate::sdl::{Event, Gfx};
 use config::{Config, FileFormat};
 use flacenc::component::BitRepr;
 use flacenc::error::Verify;
@@ -11,7 +11,7 @@ use std::cmp::max;
 use std::path::Path;
 use std::process::exit;
 use std::str::FromStr;
-use std::time::Instant;
+use std::time::Duration;
 use std::{env, io};
 use tracing::Level;
 use tracing_subscriber::fmt::writer::MakeWriterExt;
@@ -47,11 +47,8 @@ fn or_die(result: Result<(), String>) {
 // todo clean up visualization
 // todo warn when clipping occurs
 // todo figure out how to add to right click menu in nautilus without additional click into scripts submenu
-// todo write ffmpeg command such that it will never prompt for user input, such as when attempting to overwrite a file
-// todo pin sdl3 version
 // todo test on other distros
 // todo organize better / refactor / split into separate source files
-// todo see if you can get 24bit audio working
 // todo add message when quitting if writing out is taking awhile (though probably not needed if writing out as we go)
 // todo create a slideshow application that plays the audio with the corresponding picture, advancing to the next once the audio is done. slideshow will play everything in directory
 // todo   add optional "music" for background since he wants to put specific music in the background.
@@ -102,6 +99,64 @@ impl ProgramConfig {
     }
 }
 
+fn format_duration(duration: Duration) -> String {
+    let seconds = duration.as_secs_f64();
+
+    let minutes = (seconds / 60.0).floor();
+    let seconds = seconds % 60.0;
+
+    let hours = (minutes / 60.0).floor();
+    let minutes = minutes % 60.0;
+
+    if hours > 0.0 {
+        format!("{}h {}m {:.1}s", hours, minutes, seconds)
+    } else if minutes > 0.0 {
+        format!("{}m {:.1}s", minutes, seconds)
+    } else {
+        format!("{:.1}s", seconds)
+    }
+}
+
+fn draw_waveform(gfx: &Gfx, waveform: &[u32], x: f32, y: f32, width: f32, height: f32) {
+    or_die(gfx.set_render_draw_color(43, 43, 43, 255));
+    let rect = SDL_FRect {
+        x,
+        y,
+        w: width,
+        h: height,
+    };
+    or_die(gfx.render_fill_rect(&rect));
+
+    or_die(gfx.set_render_draw_color(255, 255, 255, 255));
+
+    // todo put this in its own handler widget thing which only renders the new audio to a buffer which can then be scrolled on the screen, rather than line rendering the whole waveform
+
+    const MAX_AMPLITUDE: u32 = (i32::MAX >> 8) as u32; // 24bits
+
+    let chunks_to_render = width; // one chunk per pixel
+    for (col, m) in waveform
+        .iter()
+        .skip(max(0, waveform.len() as i64 - chunks_to_render as i64) as usize)
+        .enumerate()
+    {
+        let is_clipped = *m >= MAX_AMPLITUDE - 1;
+
+        let h = *m as f32 * (height / MAX_AMPLITUDE as f32);
+        let y1 = y + (height / 2.0) - (h / 2.0);
+        let y2 = y1 + h;
+
+        if is_clipped {
+            or_die(gfx.set_render_draw_color(250, 43, 43, 255));
+        }
+
+        or_die(gfx.render_line(x + col as f32, y1, x + col as f32, y2));
+
+        if is_clipped {
+            or_die(gfx.set_render_draw_color(255, 255, 255, 255));
+        }
+    }
+}
+
 pub fn main() {
     let config = ProgramConfig::from_file().unwrap();
 
@@ -123,7 +178,6 @@ pub fn main() {
         );
     subscriber.init();
 
-    error!("test error");
     info!("Program starting");
 
     let args: Vec<String> = env::args().collect();
@@ -164,7 +218,11 @@ pub fn main() {
 
     let mut desired_interface_id = SDL_AUDIO_DEVICE_DEFAULT_RECORDING;
 
-    info!("Found {} Audio Devices:", recording_devices.len());
+    info!(
+        "Found {} Audio Devices:    [Matching on \"{}\"]",
+        recording_devices.len(),
+        config.interface
+    );
     for device in recording_devices {
         let found = if device
             .name
@@ -200,7 +258,6 @@ pub fn main() {
     let mut previous_unchunked_samples: Vec<i32> = Vec::new();
 
     loop {
-        let frame_start = Instant::now();
         // poll until all events are handled and the queue runs dry
         let mut num_events = 0;
         while let Some(event) = sdl::poll_event() {
@@ -271,10 +328,6 @@ pub fn main() {
             }
         }
 
-        let event_time = frame_start.elapsed().as_nanos();
-
-        let begin_audio = Instant::now();
-
         let mut samples = match sdl::get_audio_stream_data_i32(audio_stream) {
             Ok(s) => s,
             Err(msg) => die(format!("SDL GetAudioStreamData failed: {}", msg).as_str()),
@@ -308,83 +361,36 @@ pub fn main() {
             .cloned()
             .collect();
 
-        let audio_time = begin_audio.elapsed().as_nanos();
-
         or_die(gfx.set_render_draw_color(53, 53, 53, 255));
         or_die(gfx.render_clear());
 
         const BORDER_SIZE: f32 = 10.0;
 
-        or_die(gfx.set_render_draw_color(43, 43, 43, 255));
-        let rect = SDL_FRect{
-            x: BORDER_SIZE,
-            y: BORDER_SIZE,
-            w: window_width as f32 - BORDER_SIZE * 2.0,
-            h: 400.0,
-        };
-        or_die(gfx.render_fill_rect(&rect));
+        draw_waveform(
+            &gfx,
+            &display_waveform,
+            BORDER_SIZE,
+            BORDER_SIZE,
+            window_width as f32 - BORDER_SIZE * 2.0,
+            window_height as f32 - 100.0,
+        );
 
-        or_die(gfx.set_render_draw_color(255, 255, 255, 255));
-
-        // todo put this in its own handler widget thing which only renders the new audio to a buffer which can then be scrolled on the screen, rather than line rendering the whole waveform
-
-        let begin_waveform = Instant::now();
-
-        let chunks_to_render = window_width - 20; // one chunk per pixel
-        for (x, m) in display_waveform
-            .iter()
-            .skip(max(0, display_waveform.len() as i64 - chunks_to_render as i64) as usize)
-            .enumerate()
-        {
-            let h = *m as f32 * (400.0 / (i32::MAX >> 8) as f32);
-            let y1 = BORDER_SIZE + (400.0 / 2.0) - (h / 2.0);
-            let y2 = y1 + h;
-            if h > 390.0 {
-                or_die(gfx.set_render_draw_color(255, 43, 43, 255));
-            }
-            or_die(gfx.render_line(BORDER_SIZE + x as f32, y1, BORDER_SIZE + x as f32, y2));
-            if h > 390.0 {
-                or_die(gfx.set_render_draw_color(255, 255, 255, 255));
-            }
-        }
-
-        or_die(gfx.set_render_scale(2.0, 2.0));
-        or_die(gfx.render_debug_text(
-            format!("{:.3}s", recorded_audio.len() as f64 / 44100.0).as_str(),
-            (BORDER_SIZE + 4.0) / 2.0,
-            (400.0 + BORDER_SIZE + 8.0) / 2.0,
-        ));
+        or_die(gfx.set_render_scale(3.0, 3.0));
+        or_die(
+            gfx.render_debug_text(
+                format!(
+                    "Record Time: {}",
+                    format_duration(Duration::from_secs_f64(
+                        recorded_audio.len() as f64 / 44100.0,
+                    ))
+                )
+                .as_str(),
+                (BORDER_SIZE + 4.0) / 3.0,
+                (window_height as f32 - 100.0 + (100.0 / 2.0) - 8.0) / 3.0,
+            ),
+        );
         or_die(gfx.set_render_scale(1.0, 1.0));
 
-        let waveform_time = begin_waveform.elapsed().as_nanos();
-
-        or_die(gfx.set_render_draw_color(255, 255, 255, 255));
-        or_die(gfx.render_debug_text(
-            format!("Audio:    {:.2}", audio_time as f32 / 1000000.0).as_str(),
-            10.0,
-            550.0,
-        ));
-        or_die(gfx.render_debug_text(
-            format!("Waveform: {:.2}", waveform_time as f32 / 1000000.0).as_str(),
-            10.0,
-            560.0,
-        ));
-        or_die(gfx.render_debug_text(
-            format!("Events:   {:.2}", event_time as f32 / 1000000.0).as_str(),
-            10.0,
-            570.0,
-        ));
-        or_die(gfx.render_debug_text(
-            format!("Num Events: {:.2}", num_events).as_str(),
-            10.0,
-            580.0,
-        ));
-
         or_die(gfx.render_present());
-
-        // ::std::thread::sleep(
-        //     Duration::new(0, 1_000_000_000u32 / 60)
-        //         .saturating_sub(Instant::now().duration_since(frame_start)),
-        // ); // wait until frame time equals 1/60 sec
     }
 }
