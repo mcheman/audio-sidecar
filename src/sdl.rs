@@ -1,8 +1,8 @@
 use sdl3_sys::everything::*;
 use sdl3_sys::init::SDL_InitFlags;
 use std::cmp::min;
-use std::ffi::{c_uint, c_void, CStr, CString};
-use std::{ptr, slice};
+use std::ffi::{CStr, CString};
+use std::{ptr};
 
 const AUDIO_SPEC: SDL_AudioSpec = SDL_AudioSpec {
     channels: 1,

@@ -16,8 +16,8 @@ AutoRecord = "on"
 #        append: record audio onto the end of the existing sidecar
 #        ask: prompt the user for the behavior they want
 #
-ExistingFileStrategy = "replace"
-#ExistingFileStrategy = "rename-to-last"
+#ExistingFileStrategy = "replace"
+ExistingFileStrategy = "rename-to-last"
 
 # Specify the size of the window. All elements are scaled appropriately.
 # WindowSize <width>x<height>

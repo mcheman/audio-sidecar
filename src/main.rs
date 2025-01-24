@@ -1,23 +1,23 @@
-extern crate flacenc;
 extern crate sdl3_sys;
 
+use crate::flac::FLAC__StreamEncoderInitStatus_FLAC__STREAM_ENCODER_INIT_STATUS_OK;
 use crate::sdl::{Event, Gfx};
 use config::{Config, FileFormat};
-use flacenc::component::BitRepr;
-use flacenc::error::Verify;
 use log::{debug, error, info};
 use sdl3_sys::everything::*;
 use std::cmp::max;
+use std::ffi::CString;
 use std::path::Path;
 use std::process::exit;
 use std::str::FromStr;
 use std::time::Duration;
-use std::{env, io};
+use std::{env, io, ptr};
 use tracing::Level;
 use tracing_subscriber::fmt::writer::MakeWriterExt;
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::{fmt, layer::SubscriberExt};
 
+mod flac;
 mod sdl;
 
 fn die(s: &str) -> ! {
@@ -66,7 +66,7 @@ fn or_die(result: Result<(), String>) {
 // todo replace flacenc with reference libFLAC ffi encoder due to quality concerns (author has not maintained library recently, noticed missing metadata when looking at file in nautilus right click menu, one program failed to load these flac files (sound converter), and there was at least one instance where audio was saved distorted)
 // todo analyze the audio recorded so far and if its max amplitude (when excluding a few outliers??? like loud pops?) is too low, show a message to raise the gain. Similarly, if clipping regularly, show message asking to lower gain
 // todo rearrange code so as much as possible can be tested via test runners
-
+// todo enforce minimum window size to avoid losing the window if it's resized to tiny size
 
 #[derive(Debug, PartialEq)]
 enum ExistingFileStrategy {
@@ -118,9 +118,13 @@ impl ProgramConfig {
             .unwrap_or(String::from("audioSidecar.log"));
         let log_level: String = settings.get("LogLevel").unwrap_or(String::from("debug"));
 
-        let existing_file_strategy =
-            ExistingFileStrategy::from_str(settings.get("ExistingFileStrategy").unwrap_or(String::from("")).as_str())
-                .unwrap_or(ExistingFileStrategy::RenameToLast);
+        let existing_file_strategy = ExistingFileStrategy::from_str(
+            settings
+                .get("ExistingFileStrategy")
+                .unwrap_or(String::from(""))
+                .as_str(),
+        )
+            .unwrap_or(ExistingFileStrategy::RenameToLast);
 
         Ok(ProgramConfig {
             interface,
@@ -197,7 +201,9 @@ fn draw_text(gfx: &Gfx, text: &str, x: f32, y: f32, size: f32, centered_x: bool,
     const GLYPH_SIZE: f32 = 8.0;
 
     let offset_x = if centered_x {
-        (text.len() as f32 * GLYPH_SIZE) / 2.0
+        // note that bitmapped 8x8 pixel font generally has 2 pixels of empty space on the right and 1 pixel of space on the bottom
+        //   we subtract 1 pixel here to compensate. subtracting 0.5 pixels from Y results in mushed scaling so we don't do that
+        (text.len() as f32 * GLYPH_SIZE) / 2.0 - 1.0
     } else {
         0.0
     };
@@ -281,7 +287,6 @@ pub fn main() {
 
     info!("============= Started =============");
 
-
     let args: Vec<String> = env::args().collect();
 
     let defaultpath = String::from("/tmp/test.png");
@@ -354,8 +359,6 @@ pub fn main() {
         die(format!("SDL could not bind logical audio device to stream: {}", msg).as_str());
     }
 
-
-
     let mut recorded_audio: Vec<i32> = Vec::new();
 
     let mut display_waveform: Vec<u32> = Vec::new();
@@ -364,12 +367,14 @@ pub fn main() {
     let mut clicking = false;
     let mut mouse_x: f32 = 0.0;
     let mut mouse_y: f32 = 0.0;
+    let mut paused = false;
+
+    let mut is_clicking_save = false;
+    let mut is_clicking_pause = false;
 
     loop {
         // poll until all events are handled and the queue runs dry
-        let mut num_events = 0;
         while let Some(event) = sdl::poll_event() {
-            num_events += 1;
             match event {
                 // todo New events will have to be added both here and in sdl::poll_event()
                 Event::Window(event_type, e) => {
@@ -378,7 +383,7 @@ pub fn main() {
                         window_height = e.data2 as u32;
                     }
                 }
-                Event::Button(event_type, e) => {
+                Event::Button(event_type, _e) => {
                     if event_type == SDL_EventType::MOUSE_BUTTON_DOWN {
                         clicking = true;
                     } else if event_type == SDL_EventType::MOUSE_BUTTON_UP {
@@ -415,28 +420,30 @@ pub fn main() {
             *s >>= 8;
         }
 
-        recorded_audio.append(&mut samples.clone());
+        if !paused {
+            recorded_audio.append(&mut samples.clone());
 
-        // combine audio into chunks for display
-        const CHUNKSIZE: usize = 44100 / 100; // samples
+            // combine audio into chunks for display
+            const CHUNKSIZE: usize = 44100 / 100; // samples
 
-        previous_unchunked_samples.append(&mut samples);
-        let mut max_sample = 0;
-        for n in 0..previous_unchunked_samples.len() / CHUNKSIZE {
-            for i in 0..CHUNKSIZE {
-                let v = (previous_unchunked_samples[n * CHUNKSIZE + i] as i64).abs() as u32;
-                if v > max_sample {
-                    max_sample = v;
+            previous_unchunked_samples.append(&mut samples);
+            let mut max_sample = 0;
+            for n in 0..previous_unchunked_samples.len() / CHUNKSIZE {
+                for i in 0..CHUNKSIZE {
+                    let v = (previous_unchunked_samples[n * CHUNKSIZE + i] as i64).abs() as u32;
+                    if v > max_sample {
+                        max_sample = v;
+                    }
                 }
+                display_waveform.push(max_sample);
+                max_sample = 0;
             }
-            display_waveform.push(max_sample);
-            max_sample = 0;
+            previous_unchunked_samples = previous_unchunked_samples
+                .iter()
+                .skip((previous_unchunked_samples.len() / CHUNKSIZE) * CHUNKSIZE)
+                .cloned()
+                .collect();
         }
-        previous_unchunked_samples = previous_unchunked_samples
-            .iter()
-            .skip((previous_unchunked_samples.len() / CHUNKSIZE) * CHUNKSIZE)
-            .cloned()
-            .collect();
 
         or_die(gfx.set_render_draw_color(53, 53, 53, 255));
         or_die(gfx.render_clear());
@@ -460,7 +467,7 @@ pub fn main() {
                     recorded_audio.len() as f64 / 44100.0,
                 ))
             )
-            .as_str(),
+                .as_str(),
             BORDER_SIZE,
             window_height as f32 - (100.0 - BORDER_SIZE) / 2.0,
             3.0,
@@ -480,8 +487,12 @@ pub fn main() {
             mouse_x,
             mouse_y,
             clicking,
-        ) {
+        ) && !is_clicking_save
+        {
             info!("pressed save audio button");
+
+            is_clicking_save = true;
+
             save_and_quit(
                 &gfx,
                 filepath,
@@ -490,6 +501,32 @@ pub fn main() {
                 &mut recorded_audio,
                 &config,
             );
+        }
+
+        let p_button_width = 100.0 - BORDER_SIZE * 3.0;
+        let p_button_height = 100.0 - BORDER_SIZE * 3.0;
+        if button(
+            &gfx,
+            if paused { "|>" } else { "||" },
+            window_width as f32 - BORDER_SIZE - button_width - p_button_width - BORDER_SIZE,
+            window_height as f32 - BORDER_SIZE - button_height,
+            p_button_width,
+            p_button_height,
+            mouse_x,
+            mouse_y,
+            clicking,
+        ) && !is_clicking_pause
+        {
+            info!("pressed play/pause audio button");
+            paused = !paused;
+            is_clicking_pause = true;
+        }
+
+        // todo do a quick fade between paused sections of audio
+
+        if !clicking {
+            is_clicking_pause = false;
+            is_clicking_save = false;
         }
 
         or_die(gfx.render_present());
@@ -529,29 +566,9 @@ fn save_and_quit(
 
     //sdl::quit(); // todo hide window while audio exports so it looks immediate? alternately show a progress bar?
 
-    // save flac audio
-    let (channels, bits_per_sample, sample_rate) = (1, 24, 44100);
-    let flac_config = flacenc::config::Encoder::default()
-        .into_verified()
-        .expect("Config data error.");
-    let source = flacenc::source::MemSource::from_samples(
-        recorded_audio.as_slice(),
-        channels,
-        bits_per_sample,
-        sample_rate,
-    );
-    let flac_stream =
-        flacenc::encode_with_fixed_block_size(&flac_config, source, flac_config.block_size)
-            .expect("Encode failed.");
 
     debug!("Saving audio to disk...");
 
-    // `Stream` implements `BitRepr` so you can obtain the encoded stream via
-    // `ByteSink` struct that implements `BitSink`.
-    let mut sink = flacenc::bitsink::ByteSink::new();
-    flac_stream.write(&mut sink).expect("TODO: panic message");
-
-    // Then, e.g. you can write it to a file.
     let filename_base = filepath
         .with_extension("")
         .file_name()
@@ -561,6 +578,7 @@ fn save_and_quit(
     let filename = filename_base.clone() + "_audio.flac";
 
     let mut outputfile = filepath.with_file_name(filename);
+
 
     if std::fs::exists(&outputfile).unwrap_or(true) {
         // fail safely, assume conflict if can't determine
@@ -593,7 +611,61 @@ fn save_and_quit(
 
     info!("Saving audio to \"{}\"", outputfile.display());
 
-    std::fs::write(outputfile, sink.as_slice()).expect("Failed to write flac");
+    unsafe {
+        let encoder = flac::FLAC__stream_encoder_new();
+        if encoder.is_null() {
+            die("1");
+        }
+
+        // flac__bool is 1 for true, 0 for false
+        let mut ok = flac::FLAC__stream_encoder_set_compression_level(encoder, 8);
+        ok &= flac::FLAC__stream_encoder_set_channels(encoder, 1);
+        ok &= flac::FLAC__stream_encoder_set_bits_per_sample(encoder, 24);
+        ok &= flac::FLAC__stream_encoder_set_sample_rate(encoder, 44100);
+
+        if ok == 0 {
+            die("2");
+        }
+
+        let mut metadata: [*mut flac::FLAC__StreamMetadata; 2] = [ptr::null_mut(); 2];
+        metadata[0] = flac::FLAC__metadata_object_new(
+            flac::FLAC__MetadataType_FLAC__METADATA_TYPE_VORBIS_COMMENT,
+        );
+        metadata[1] =
+            flac::FLAC__metadata_object_new(flac::FLAC__MetadataType_FLAC__METADATA_TYPE_PADDING);
+
+        // todo check metadatas for NULL
+
+        (*metadata[1]).length = 1234;
+
+        ok = flac::FLAC__stream_encoder_set_metadata(encoder, metadata.as_mut_ptr(), 2);
+        if ok == 0 {
+            die("3");
+        }
+
+        let init_status = flac::FLAC__stream_encoder_init_file(
+            encoder,
+            CString::new(outputfile.display().to_string())
+                .expect("filename to be converted to CString")
+                .as_ptr(),
+            None,
+            ptr::null_mut(),
+        );
+
+        if init_status != FLAC__StreamEncoderInitStatus_FLAC__STREAM_ENCODER_INIT_STATUS_OK {
+            die("4");
+        }
+
+
+        let ok = flac::FLAC__stream_encoder_process(encoder, &recorded_audio.as_ptr(), recorded_audio.len() as u32);
+
+        let ok = flac::FLAC__stream_encoder_finish(encoder);
+
+        flac::FLAC__metadata_object_delete(metadata[0]);
+        flac::FLAC__metadata_object_delete(metadata[1]);
+        flac::FLAC__stream_encoder_delete(encoder);
+    }
+
 
     info!("Audio saved");
     gfx.hide_window();
