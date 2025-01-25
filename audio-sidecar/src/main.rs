@@ -1,22 +1,22 @@
-extern crate sdl3_sys;
 extern crate flac_sys;
+extern crate sdl3_sys;
 
 use crate::sdl::{Event, Gfx};
 use config::{Config, FileFormat};
 use log::{debug, error, info};
 use sdl3_sys::everything::*;
 use std::cmp::max;
-use std::ffi::CString;
 use std::path::Path;
 use std::process::exit;
 use std::str::FromStr;
 use std::time::Duration;
-use std::{env, io, ptr};
+use std::{env, io};
 use tracing::Level;
 use tracing_subscriber::fmt::writer::MakeWriterExt;
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::{fmt, layer::SubscriberExt};
 
+mod flac;
 mod sdl;
 
 fn die(s: &str) -> ! {
@@ -27,7 +27,7 @@ fn die(s: &str) -> ! {
 
 fn or_die(result: Result<(), String>) {
     if let Err(msg) = result {
-        die(format!("SDL Something weird happened because a function that should not have failed has failed: {}", msg).as_str());
+        die(format!("Something weird happened because a function that should not have failed has failed: {}", msg).as_str());
     }
 }
 
@@ -124,7 +124,7 @@ impl ProgramConfig {
                 .unwrap_or(String::from(""))
                 .as_str(),
         )
-            .unwrap_or(ExistingFileStrategy::RenameToLast);
+        .unwrap_or(ExistingFileStrategy::RenameToLast);
 
         Ok(ProgramConfig {
             interface,
@@ -467,7 +467,7 @@ pub fn main() {
                     recorded_audio.len() as f64 / 44100.0,
                 ))
             )
-                .as_str(),
+            .as_str(),
             BORDER_SIZE,
             window_height as f32 - (100.0 - BORDER_SIZE) / 2.0,
             3.0,
@@ -566,7 +566,6 @@ fn save_and_quit(
 
     //sdl::quit(); // todo hide window while audio exports so it looks immediate? alternately show a progress bar?
 
-
     debug!("Saving audio to disk...");
 
     let filename_base = filepath
@@ -578,7 +577,6 @@ fn save_and_quit(
     let filename = filename_base.clone() + "_audio.flac";
 
     let mut outputfile = filepath.with_file_name(filename);
-
 
     if std::fs::exists(&outputfile).unwrap_or(true) {
         // fail safely, assume conflict if can't determine
@@ -611,61 +609,18 @@ fn save_and_quit(
 
     info!("Saving audio to \"{}\"", outputfile.display());
 
-    unsafe {
-        let encoder = flac_sys::FLAC__stream_encoder_new();
-        if encoder.is_null() {
-            die("1");
-        }
+    let mut encoder_config = flac::EncoderConfig::new();
 
-        // flac__bool is 1 for true, 0 for false
-        let mut ok = flac_sys::FLAC__stream_encoder_set_compression_level(encoder, 8);
-        ok &= flac_sys::FLAC__stream_encoder_set_channels(encoder, 1);
-        ok &= flac_sys::FLAC__stream_encoder_set_bits_per_sample(encoder, 24);
-        ok &= flac_sys::FLAC__stream_encoder_set_sample_rate(encoder, 44100);
+    encoder_config.set_output_path(&outputfile);
 
-        if ok == 0 {
-            die("2");
-        }
+    let encoder = match encoder_config.get_encoder() {
+        Ok(e) => e,
+        Err(msg) => die(msg.as_str()),
+    };
 
-        let mut metadata: [*mut flac_sys::FLAC__StreamMetadata; 2] = [ptr::null_mut(); 2];
-        metadata[0] = flac_sys::FLAC__metadata_object_new(
-            flac_sys::FLAC__MetadataType_FLAC__METADATA_TYPE_VORBIS_COMMENT,
-        );
-        metadata[1] =
-            flac_sys::FLAC__metadata_object_new(flac_sys::FLAC__MetadataType_FLAC__METADATA_TYPE_PADDING);
+    or_die(encoder.encode(recorded_audio));
 
-        // todo check metadatas for NULL
-
-        (*metadata[1]).length = 1234;
-
-        ok = flac_sys::FLAC__stream_encoder_set_metadata(encoder, metadata.as_mut_ptr(), 2);
-        if ok == 0 {
-            die("3");
-        }
-
-        let init_status = flac_sys::FLAC__stream_encoder_init_file(
-            encoder,
-            CString::new(outputfile.display().to_string())
-                .expect("filename to be converted to CString")
-                .as_ptr(),
-            None,
-            ptr::null_mut(),
-        );
-
-        if init_status != flac_sys::FLAC__StreamEncoderInitStatus_FLAC__STREAM_ENCODER_INIT_STATUS_OK {
-            die("4");
-        }
-
-
-        let ok = flac_sys::FLAC__stream_encoder_process(encoder, &recorded_audio.as_ptr(), recorded_audio.len() as u32);
-
-        let ok = flac_sys::FLAC__stream_encoder_finish(encoder);
-
-        flac_sys::FLAC__metadata_object_delete(metadata[0]);
-        flac_sys::FLAC__metadata_object_delete(metadata[1]);
-        flac_sys::FLAC__stream_encoder_delete(encoder);
-    }
-
+    or_die(encoder.finish());
 
     info!("Audio saved");
     gfx.hide_window();

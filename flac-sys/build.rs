@@ -23,9 +23,12 @@ fn main() {
     println!("cargo::metadata=OUT_DIR={}", out_dir.display());
 
     // ensure that jetbrains IDE can find bindings.rs
-    println!("cargo:rustc-link-search={}", env::var("OUT_DIR").unwrap());
+    // println!("cargo:rustc-link-search={}", env::var("OUT_DIR").unwrap());
     // ensure that the libFLAC.a file from the flac build directory can be found for linking
-    println!("cargo:rustc-link-search={}/lib/", env::var("OUT_DIR").unwrap());
+    println!(
+        "cargo:rustc-link-search={}/lib/",
+        env::var("OUT_DIR").unwrap()
+    );
 
     println!("cargo::rustc-link-lib=static=FLAC");
 
