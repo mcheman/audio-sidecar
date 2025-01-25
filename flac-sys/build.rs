@@ -1,20 +1,34 @@
 use std::env;
 use std::path::PathBuf;
 
+const VERSION: &str = "1.4.3";
+
+// this static links
 fn main() {
-    // todo push flac bindings into separate crate
-    // todo build flac locally and link it statically
+    let lib_dir = format!("flac-{}", VERSION);
 
-    // Tell cargo to look for shared libraries in the specified directory
-    println!("cargo:rustc-link-search=/lib/");
+    let mut config = cmake::Config::new(lib_dir.clone());
 
-    // Tell cargo to tell rustc to link the system FLAC
-    // shared library.
-    println!("cargo:rustc-link-lib=FLAC");
+    config
+        .define("WITH_OGG", "OFF")
+        .define("BUILD_CXXLIBS", "OFF")
+        .define("BUILD_DOCS", "OFF")
+        .define("BUILD_EXAMPLES", "OFF")
+        .define("BUILD_PROGRAMS", "OFF")
+        .define("BUILD_SHARED_LIBS", "OFF")
+        .define("BUILD_TESTING", "OFF")
+        .define("BUILD_UTILS", "OFF");
 
-    // The bindgen::Builder is the main entry point
-    // to bindgen, and lets you build up options for
-    // the resulting bindings.
+    let out_dir = config.build();
+    println!("cargo::metadata=OUT_DIR={}", out_dir.display());
+
+    // ensure that jetbrains IDE can find bindings.rs
+    println!("cargo:rustc-link-search={}", env::var("OUT_DIR").unwrap());
+    // ensure that the libFLAC.a file from the flac build directory can be found for linking
+    println!("cargo:rustc-link-search={}/lib/", env::var("OUT_DIR").unwrap());
+
+    println!("cargo::rustc-link-lib=static=FLAC");
+
     let bindings = bindgen::Builder::default()
         // The input header we would like to generate
         // bindings for.
@@ -28,8 +42,8 @@ fn main() {
         .expect("Unable to generate bindings");
 
     // Write the bindings to the $OUT_DIR/bindings.rs file.
-    let out_path = PathBuf::from(env::var("OUT_DIR").unwrap());
+    let out_path = PathBuf::from(env::var("OUT_DIR").unwrap()).join("bindings.rs");
     bindings
-        .write_to_file(out_path.join("bindings.rs"))
+        .write_to_file(out_path)
         .expect("Couldn't write bindings!");
 }
