@@ -1,6 +1,6 @@
 extern crate sdl3_sys;
+extern crate flac_sys;
 
-use crate::flac::FLAC__StreamEncoderInitStatus_FLAC__STREAM_ENCODER_INIT_STATUS_OK;
 use crate::sdl::{Event, Gfx};
 use config::{Config, FileFormat};
 use log::{debug, error, info};
@@ -17,7 +17,6 @@ use tracing_subscriber::fmt::writer::MakeWriterExt;
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::{fmt, layer::SubscriberExt};
 
-mod flac;
 mod sdl;
 
 fn die(s: &str) -> ! {
@@ -67,6 +66,7 @@ fn or_die(result: Result<(), String>) {
 // todo analyze the audio recorded so far and if its max amplitude (when excluding a few outliers??? like loud pops?) is too low, show a message to raise the gain. Similarly, if clipping regularly, show message asking to lower gain
 // todo rearrange code so as much as possible can be tested via test runners
 // todo enforce minimum window size to avoid losing the window if it's resized to tiny size
+// todo add sdl3_ttf via bindgen ffi like with libFLAC
 
 #[derive(Debug, PartialEq)]
 enum ExistingFileStrategy {
@@ -612,38 +612,38 @@ fn save_and_quit(
     info!("Saving audio to \"{}\"", outputfile.display());
 
     unsafe {
-        let encoder = flac::FLAC__stream_encoder_new();
+        let encoder = flac_sys::FLAC__stream_encoder_new();
         if encoder.is_null() {
             die("1");
         }
 
         // flac__bool is 1 for true, 0 for false
-        let mut ok = flac::FLAC__stream_encoder_set_compression_level(encoder, 8);
-        ok &= flac::FLAC__stream_encoder_set_channels(encoder, 1);
-        ok &= flac::FLAC__stream_encoder_set_bits_per_sample(encoder, 24);
-        ok &= flac::FLAC__stream_encoder_set_sample_rate(encoder, 44100);
+        let mut ok = flac_sys::FLAC__stream_encoder_set_compression_level(encoder, 8);
+        ok &= flac_sys::FLAC__stream_encoder_set_channels(encoder, 1);
+        ok &= flac_sys::FLAC__stream_encoder_set_bits_per_sample(encoder, 24);
+        ok &= flac_sys::FLAC__stream_encoder_set_sample_rate(encoder, 44100);
 
         if ok == 0 {
             die("2");
         }
 
-        let mut metadata: [*mut flac::FLAC__StreamMetadata; 2] = [ptr::null_mut(); 2];
-        metadata[0] = flac::FLAC__metadata_object_new(
-            flac::FLAC__MetadataType_FLAC__METADATA_TYPE_VORBIS_COMMENT,
+        let mut metadata: [*mut flac_sys::FLAC__StreamMetadata; 2] = [ptr::null_mut(); 2];
+        metadata[0] = flac_sys::FLAC__metadata_object_new(
+            flac_sys::FLAC__MetadataType_FLAC__METADATA_TYPE_VORBIS_COMMENT,
         );
         metadata[1] =
-            flac::FLAC__metadata_object_new(flac::FLAC__MetadataType_FLAC__METADATA_TYPE_PADDING);
+            flac_sys::FLAC__metadata_object_new(flac_sys::FLAC__MetadataType_FLAC__METADATA_TYPE_PADDING);
 
         // todo check metadatas for NULL
 
         (*metadata[1]).length = 1234;
 
-        ok = flac::FLAC__stream_encoder_set_metadata(encoder, metadata.as_mut_ptr(), 2);
+        ok = flac_sys::FLAC__stream_encoder_set_metadata(encoder, metadata.as_mut_ptr(), 2);
         if ok == 0 {
             die("3");
         }
 
-        let init_status = flac::FLAC__stream_encoder_init_file(
+        let init_status = flac_sys::FLAC__stream_encoder_init_file(
             encoder,
             CString::new(outputfile.display().to_string())
                 .expect("filename to be converted to CString")
@@ -652,18 +652,18 @@ fn save_and_quit(
             ptr::null_mut(),
         );
 
-        if init_status != FLAC__StreamEncoderInitStatus_FLAC__STREAM_ENCODER_INIT_STATUS_OK {
+        if init_status != flac_sys::FLAC__StreamEncoderInitStatus_FLAC__STREAM_ENCODER_INIT_STATUS_OK {
             die("4");
         }
 
 
-        let ok = flac::FLAC__stream_encoder_process(encoder, &recorded_audio.as_ptr(), recorded_audio.len() as u32);
+        let ok = flac_sys::FLAC__stream_encoder_process(encoder, &recorded_audio.as_ptr(), recorded_audio.len() as u32);
 
-        let ok = flac::FLAC__stream_encoder_finish(encoder);
+        let ok = flac_sys::FLAC__stream_encoder_finish(encoder);
 
-        flac::FLAC__metadata_object_delete(metadata[0]);
-        flac::FLAC__metadata_object_delete(metadata[1]);
-        flac::FLAC__stream_encoder_delete(encoder);
+        flac_sys::FLAC__metadata_object_delete(metadata[0]);
+        flac_sys::FLAC__metadata_object_delete(metadata[1]);
+        flac_sys::FLAC__stream_encoder_delete(encoder);
     }
 
 
