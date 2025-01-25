@@ -15,6 +15,7 @@ use tracing::Level;
 use tracing_subscriber::fmt::writer::MakeWriterExt;
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::{fmt, layer::SubscriberExt};
+use crate::flac::Encoder;
 
 mod flac;
 mod sdl;
@@ -67,6 +68,7 @@ fn or_die(result: Result<(), String>) {
 // todo rearrange code so as much as possible can be tested via test runners
 // todo enforce minimum window size to avoid losing the window if it's resized to tiny size
 // todo add sdl3_ttf via bindgen ffi like with libFLAC
+// todo build action in ci with auto released artifacts?
 
 #[derive(Debug, PartialEq)]
 enum ExistingFileStrategy {
@@ -359,8 +361,6 @@ pub fn main() {
         die(format!("SDL could not bind logical audio device to stream: {}", msg).as_str());
     }
 
-    let mut recorded_audio: Vec<i32> = Vec::new();
-
     let mut display_waveform: Vec<u32> = Vec::new();
     let mut previous_unchunked_samples: Vec<i32> = Vec::new();
 
@@ -372,201 +372,9 @@ pub fn main() {
     let mut is_clicking_save = false;
     let mut is_clicking_pause = false;
 
-    loop {
-        // poll until all events are handled and the queue runs dry
-        while let Some(event) = sdl::poll_event() {
-            match event {
-                // todo New events will have to be added both here and in sdl::poll_event()
-                Event::Window(event_type, e) => {
-                    if event_type == SDL_EventType::WINDOW_RESIZED {
-                        window_width = e.data1 as u32;
-                        window_height = e.data2 as u32;
-                    }
-                }
-                Event::Button(event_type, _e) => {
-                    if event_type == SDL_EventType::MOUSE_BUTTON_DOWN {
-                        clicking = true;
-                    } else if event_type == SDL_EventType::MOUSE_BUTTON_UP {
-                        clicking = false;
-                    }
-                }
-                Event::Motion(event_type, e) => {
-                    if event_type == SDL_EventType::MOUSE_MOTION {
-                        mouse_x = e.x;
-                        mouse_y = e.y;
-                    }
-                }
-                Event::Quit(_) => {
-                    save_and_quit(
-                        &gfx,
-                        filepath,
-                        logical_interface_id,
-                        audio_stream,
-                        &mut recorded_audio,
-                        &config,
-                    );
-                }
-                _ => continue,
-            }
-        }
+    let mut sample_count= 0u64;
 
-        let mut samples = match sdl::get_audio_stream_data_i32(audio_stream) {
-            Ok(s) => s,
-            Err(msg) => die(format!("SDL GetAudioStreamData failed: {}", msg).as_str()),
-        };
 
-        // clip audio to 24 bits by removing quietest 8 bits
-        for s in samples.iter_mut() {
-            *s >>= 8;
-        }
-
-        if !paused {
-            recorded_audio.append(&mut samples.clone());
-
-            // combine audio into chunks for display
-            const CHUNKSIZE: usize = 44100 / 100; // samples
-
-            previous_unchunked_samples.append(&mut samples);
-            let mut max_sample = 0;
-            for n in 0..previous_unchunked_samples.len() / CHUNKSIZE {
-                for i in 0..CHUNKSIZE {
-                    let v = (previous_unchunked_samples[n * CHUNKSIZE + i] as i64).abs() as u32;
-                    if v > max_sample {
-                        max_sample = v;
-                    }
-                }
-                display_waveform.push(max_sample);
-                max_sample = 0;
-            }
-            previous_unchunked_samples = previous_unchunked_samples
-                .iter()
-                .skip((previous_unchunked_samples.len() / CHUNKSIZE) * CHUNKSIZE)
-                .cloned()
-                .collect();
-        }
-
-        or_die(gfx.set_render_draw_color(53, 53, 53, 255));
-        or_die(gfx.render_clear());
-
-        const BORDER_SIZE: f32 = 10.0;
-
-        draw_waveform(
-            &gfx,
-            &display_waveform,
-            BORDER_SIZE,
-            BORDER_SIZE,
-            window_width as f32 - BORDER_SIZE * 2.0,
-            window_height as f32 - 100.0,
-        );
-
-        draw_text(
-            &gfx,
-            format!(
-                "Record Time: {}",
-                format_duration(Duration::from_secs_f64(
-                    recorded_audio.len() as f64 / 44100.0,
-                ))
-            )
-            .as_str(),
-            BORDER_SIZE,
-            window_height as f32 - (100.0 - BORDER_SIZE) / 2.0,
-            3.0,
-            false,
-            true,
-        );
-
-        let button_width = 300.0;
-        let button_height = 100.0 - BORDER_SIZE * 3.0;
-        if button(
-            &gfx,
-            "Save Audio",
-            window_width as f32 - BORDER_SIZE - button_width,
-            window_height as f32 - BORDER_SIZE - button_height,
-            button_width,
-            button_height,
-            mouse_x,
-            mouse_y,
-            clicking,
-        ) && !is_clicking_save
-        {
-            info!("pressed save audio button");
-
-            is_clicking_save = true;
-
-            save_and_quit(
-                &gfx,
-                filepath,
-                logical_interface_id,
-                audio_stream,
-                &mut recorded_audio,
-                &config,
-            );
-        }
-
-        let p_button_width = 100.0 - BORDER_SIZE * 3.0;
-        let p_button_height = 100.0 - BORDER_SIZE * 3.0;
-        if button(
-            &gfx,
-            if paused { "|>" } else { "||" },
-            window_width as f32 - BORDER_SIZE - button_width - p_button_width - BORDER_SIZE,
-            window_height as f32 - BORDER_SIZE - button_height,
-            p_button_width,
-            p_button_height,
-            mouse_x,
-            mouse_y,
-            clicking,
-        ) && !is_clicking_pause
-        {
-            info!("pressed play/pause audio button");
-            paused = !paused;
-            is_clicking_pause = true;
-        }
-
-        // todo do a quick fade between paused sections of audio
-
-        if !clicking {
-            is_clicking_pause = false;
-            is_clicking_save = false;
-        }
-
-        or_die(gfx.render_present());
-    }
-}
-
-fn save_and_quit(
-    gfx: &Gfx,
-    filepath: &Path,
-    logical_interface_id: SDL_AudioDeviceID,
-    audio_stream: *mut SDL_AudioStream,
-    recorded_audio: &mut Vec<i32>,
-    config: &ProgramConfig,
-) {
-    info!("Shutdown triggered");
-
-    debug!("Capturing final audio samples...");
-
-    if let Err(msg) = sdl::flush_audio_stream(audio_stream) {
-        die(format!("SDL could not flush audio stream: {}", msg).as_str());
-    }
-    sdl::close_audio_device(logical_interface_id);
-
-    // get last bit of audio
-    let mut samples = match sdl::get_audio_stream_data_i32(audio_stream) {
-        Ok(s) => s,
-        Err(msg) => die(format!("SDL GetAudioStreamData failed: {}", msg).as_str()),
-    };
-    // clip audio to 24 bits by removing quietest 8 bits
-    for s in samples.iter_mut() {
-        *s >>= 8;
-    }
-
-    recorded_audio.append(&mut samples);
-
-    debug!("Encoding audio...");
-
-    //sdl::quit(); // todo hide window while audio exports so it looks immediate? alternately show a progress bar?
-
-    debug!("Saving audio to disk...");
 
     let filename_base = filepath
         .with_extension("")
@@ -618,8 +426,197 @@ fn save_and_quit(
         Err(msg) => die(msg.as_str()),
     };
 
-    or_die(encoder.encode(recorded_audio));
 
+
+    loop {
+        // poll until all events are handled and the queue runs dry
+        while let Some(event) = sdl::poll_event() {
+            match event {
+                // todo New events will have to be added both here and in sdl::poll_event()
+                Event::Window(event_type, e) => {
+                    if event_type == SDL_EventType::WINDOW_RESIZED {
+                        window_width = e.data1 as u32;
+                        window_height = e.data2 as u32;
+                    }
+                }
+                Event::Button(event_type, _e) => {
+                    if event_type == SDL_EventType::MOUSE_BUTTON_DOWN {
+                        clicking = true;
+                    } else if event_type == SDL_EventType::MOUSE_BUTTON_UP {
+                        clicking = false;
+                    }
+                }
+                Event::Motion(event_type, e) => {
+                    if event_type == SDL_EventType::MOUSE_MOTION {
+                        mouse_x = e.x;
+                        mouse_y = e.y;
+                    }
+                }
+                Event::Quit(_) => {
+                    save_and_quit(
+                        &gfx,
+                        encoder,
+                        logical_interface_id,
+                        audio_stream,
+                    );
+                }
+                _ => continue,
+            }
+        }
+
+        let mut samples = match sdl::get_audio_stream_data_i32(audio_stream) {
+            Ok(s) => s,
+            Err(msg) => die(format!("SDL GetAudioStreamData failed: {}", msg).as_str()),
+        };
+
+
+
+        if !paused {
+            // clip audio to 24 bits by removing quietest 8 bits
+            for s in samples.iter_mut() {
+                *s >>= 8;
+            }
+
+            sample_count += samples.len() as u64;
+
+            or_die(encoder.encode(&samples)); // encode and save to file as we go
+
+            // combine audio into chunks for display
+            const CHUNKSIZE: usize = 44100 / 100; // samples
+
+            previous_unchunked_samples.append(&mut samples);
+            let mut max_sample = 0;
+            for n in 0..previous_unchunked_samples.len() / CHUNKSIZE {
+                for i in 0..CHUNKSIZE {
+                    let v = (previous_unchunked_samples[n * CHUNKSIZE + i] as i64).abs() as u32;
+                    if v > max_sample {
+                        max_sample = v;
+                    }
+                }
+                display_waveform.push(max_sample);
+                max_sample = 0;
+            }
+            previous_unchunked_samples = previous_unchunked_samples
+                .iter()
+                .skip((previous_unchunked_samples.len() / CHUNKSIZE) * CHUNKSIZE)
+                .cloned()
+                .collect();
+        }
+
+        or_die(gfx.set_render_draw_color(53, 53, 53, 255));
+        or_die(gfx.render_clear());
+
+        const BORDER_SIZE: f32 = 10.0;
+
+        draw_waveform(
+            &gfx,
+            &display_waveform,
+            BORDER_SIZE,
+            BORDER_SIZE,
+            window_width as f32 - BORDER_SIZE * 2.0,
+            window_height as f32 - 100.0,
+        );
+
+        draw_text(
+            &gfx,
+            format!(
+                "Record Time: {}",
+                format_duration(Duration::from_secs_f64(
+                    sample_count as f64 / 44100.0,
+                ))
+            )
+            .as_str(),
+            BORDER_SIZE,
+            window_height as f32 - (100.0 - BORDER_SIZE) / 2.0,
+            3.0,
+            false,
+            true,
+        );
+
+        let button_width = 300.0;
+        let button_height = 100.0 - BORDER_SIZE * 3.0;
+        if button(
+            &gfx,
+            "Save Audio",
+            window_width as f32 - BORDER_SIZE - button_width,
+            window_height as f32 - BORDER_SIZE - button_height,
+            button_width,
+            button_height,
+            mouse_x,
+            mouse_y,
+            clicking,
+        ) && !is_clicking_save
+        {
+            info!("pressed save audio button");
+
+            is_clicking_save = true;
+
+            save_and_quit(
+                &gfx,
+                encoder,
+                logical_interface_id,
+                audio_stream,
+            );
+        }
+
+        let p_button_width = 100.0 - BORDER_SIZE * 3.0;
+        let p_button_height = 100.0 - BORDER_SIZE * 3.0;
+        if button(
+            &gfx,
+            if paused { "|>" } else { "||" },
+            window_width as f32 - BORDER_SIZE - button_width - p_button_width - BORDER_SIZE,
+            window_height as f32 - BORDER_SIZE - button_height,
+            p_button_width,
+            p_button_height,
+            mouse_x,
+            mouse_y,
+            clicking,
+        ) && !is_clicking_pause
+        {
+            info!("pressed play/pause audio button");
+            paused = !paused;
+            is_clicking_pause = true;
+        }
+
+        // todo do a quick fade between paused sections of audio
+
+        if !clicking {
+            is_clicking_pause = false;
+            is_clicking_save = false;
+        }
+
+        or_die(gfx.render_present());
+    }
+}
+
+fn save_and_quit(
+    gfx: &Gfx,
+    encoder: Encoder,
+    logical_interface_id: SDL_AudioDeviceID,
+    audio_stream: *mut SDL_AudioStream,
+) -> ! {
+    info!("Shutdown triggered");
+
+    debug!("Capturing final audio samples...");
+
+    if let Err(msg) = sdl::flush_audio_stream(audio_stream) {
+        die(format!("SDL could not flush audio stream: {}", msg).as_str());
+    }
+    sdl::close_audio_device(logical_interface_id);
+
+    // get last bit of audio
+    let mut samples = match sdl::get_audio_stream_data_i32(audio_stream) {
+        Ok(s) => s,
+        Err(msg) => die(format!("SDL GetAudioStreamData failed: {}", msg).as_str()),
+    };
+    // clip audio to 24 bits by removing quietest 8 bits
+    for s in samples.iter_mut() {
+        *s >>= 8;
+    }
+
+    debug!("Finalizing audio to disk...");
+
+    or_die(encoder.encode(&samples));
     or_die(encoder.finish());
 
     info!("Audio saved");
