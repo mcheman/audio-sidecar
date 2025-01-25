@@ -1,0 +1,16 @@
+[package]
+name = "sdl-ttf-sys"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "sdl_ttf_sys"
+path = "lib.rs"
+
+[dependencies]
+# required for build.rs since this must build against the main sdl3 library
+sdl3-sys = { version = "0.4.0", features = ["build-from-source", "link-static"] }
+
+[build-dependencies]
+bindgen = "0.71.1"
+cmake = "0.1"
