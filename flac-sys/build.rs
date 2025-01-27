@@ -22,20 +22,33 @@ fn main() {
     let out_dir = config.build();
     println!("cargo::metadata=OUT_DIR={}", out_dir.display());
 
-    // ensure that jetbrains IDE can find bindings.rs
-    // println!("cargo:rustc-link-search={}", env::var("OUT_DIR").unwrap());
     // ensure that the libFLAC.a file from the flac build directory can be found for linking
-    println!(
-        "cargo:rustc-link-search={}/lib/",
-        env::var("OUT_DIR").unwrap()
-    );
+    println!("cargo:rustc-link-search={}/lib/", out_dir.display());
 
     println!("cargo::rustc-link-lib=static=FLAC");
+
+    let out_dir_include_path = out_dir
+        .join("include")
+        .join("FLAC")
+        .canonicalize()
+        .expect("to be able to canonicalize path");
 
     let bindings = bindgen::Builder::default()
         // The input header we would like to generate
         // bindings for.
-        .header("wrapper.h")
+        // .header("wrapper.h")
+        .header(
+            out_dir_include_path
+                .join("metadata.h")
+                .to_str()
+                .expect("path to be valid Unicode"),
+        )
+        .header(
+            out_dir_include_path
+                .join("stream_encoder.h")
+                .to_str()
+                .expect("path to be valid Unicode"),
+        )
         // Tell cargo to invalidate the built crate whenever any of the
         // included header files changed.
         .parse_callbacks(Box::new(bindgen::CargoCallbacks::new()))

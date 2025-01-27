@@ -10,7 +10,9 @@ use std::path::Path;
 use std::process::exit;
 use std::str::FromStr;
 use std::time::Duration;
-use std::{env, io};
+use std::{env, io, panic};
+use std::any::Any;
+use std::backtrace::Backtrace;
 use tracing::Level;
 use tracing_subscriber::fmt::writer::MakeWriterExt;
 use tracing_subscriber::util::SubscriberInitExt;
@@ -28,7 +30,7 @@ fn die(s: &str) -> ! {
 
 fn or_die(result: Result<(), String>) {
     if let Err(msg) = result {
-        die(format!("Something weird happened because a function that should not have failed has failed: {}", msg).as_str());
+        die(format!("Something weird happened becausee a function that should not have failed has failed: {}", msg).as_str());
     }
 }
 
@@ -266,6 +268,20 @@ fn button(
     mouse_colliding && clicked
 }
 
+// redirect panics to log file. woe is me if this panics within the logger itself
+fn handle_panic(payload: &(dyn Any + Send), backtrace: Backtrace) {
+    error!("Panicked: ");
+    if let Some(string) = payload.downcast_ref::<String>() {
+        error!("{string}");
+    } else if let Some(str) = payload.downcast_ref::<&'static str>() {
+        error!("{str}");
+    } else {
+        error!("{payload:?}");
+    }
+
+    error!("Backtrace: {backtrace:#?}");
+}
+
 pub fn main() {
     let config = ProgramConfig::from_file().unwrap();
 
@@ -286,6 +302,11 @@ pub fn main() {
                 .with_writer(non_blocking.with_max_level(level)),
         );
     subscriber.init();
+
+    panic::set_hook(Box::new(|info| {
+        let backtrace = std::backtrace::Backtrace::force_capture();
+        handle_panic(info.payload(), backtrace)
+    }));
 
     info!("============= Started =============");
 
