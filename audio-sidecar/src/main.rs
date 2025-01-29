@@ -119,7 +119,7 @@ pub fn main() {
     // The X11 window is responsible for the window flashing on creation. Wayland does not experience this issue.
     // SDL_VIDEO_DRIVER=wayland can force wayland
     let gfx = match sdl::create_window_and_renderer(
-        "Record Audio",
+        "Audio Recorder",
         config.window_width,
         config.window_height,
         SDL_WINDOW_RESIZABLE,

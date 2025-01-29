@@ -1,7 +1,7 @@
 use crate::sdl::Gfx;
 use crate::utils::or_die;
 use sdl3_sys::everything::{SDL_FColor, SDL_FRect};
-use std::cmp::max;
+use std::cmp::{max, min};
 
 const BACKGROUND_COLOR: SDL_FColor = SDL_FColor {
     r: 0.207,
@@ -40,8 +40,8 @@ const WAVEFORM_PAUSED_COLOR: SDL_FColor = SDL_FColor {
 
 const WAVEFORM_CLIPPED_COLOR: SDL_FColor = SDL_FColor {
     r: 1.0,
-    g: 0.2,
-    b: 0.2,
+    g: 0.331,
+    b: 0.224,
     a: 1.0,
 };
 
@@ -162,9 +162,14 @@ impl UI {
         // button text
         or_die(self.gfx.set_render_draw_color(TEXT_COLOR));
 
-
-
-        self.draw_text(text, x + width / 2.0, y + height / 2.0 + y_offset, 3.0, true, true);
+        self.draw_text(
+            text,
+            x + width / 2.0,
+            y + height / 2.0 + y_offset,
+            3.0,
+            true,
+            true,
+        );
 
         mouse_colliding && self.click_occurred()
     }
@@ -208,12 +213,20 @@ impl UI {
         height: f32,
         is_recording: bool,
     ) {
-        let background_color = if is_recording {WAVEFORM_BACKGROUND_COLOR} else {WAVEFORM_BACKGROUND_PAUSED_COLOR};
-        let waveform_color = if is_recording {WAVEFORM_COLOR} else {WAVEFORM_PAUSED_COLOR};
+        let background_color = if is_recording {
+            WAVEFORM_BACKGROUND_COLOR
+        } else {
+            WAVEFORM_BACKGROUND_PAUSED_COLOR
+        };
+        let waveform_color = if is_recording {
+            WAVEFORM_COLOR
+        } else {
+            WAVEFORM_PAUSED_COLOR
+        };
 
         or_die(self.gfx.set_render_draw_color(background_color));
 
-        let rect = SDL_FRect {
+        let mut rect = SDL_FRect {
             x,
             y,
             w: width,
@@ -223,14 +236,16 @@ impl UI {
 
         or_die(self.gfx.set_render_draw_color(waveform_color));
 
-
         // todo render the new audio to a buffer which can then be scrolled on the screen, rather than line rendering the whole waveform
 
         const MAX_AMPLITUDE: u32 = (i32::MAX >> 8) as u32; // 24bits
         let max_conversion_factor: f32 = height / MAX_AMPLITUDE as f32;
         let y_middle = y + height / 2.0;
 
+        let mut is_clipping_now = false;
+
         let chunks_to_render = width; // one chunk per pixel
+        let max_col = min(waveform.len(), chunks_to_render as usize);
         for (col, m) in waveform
             .iter()
             .skip(max(0, waveform.len() as i64 - chunks_to_render as i64) as usize)
@@ -238,10 +253,14 @@ impl UI {
         {
             // if clipped, draw as red
             if *m >= MAX_AMPLITUDE - 1 {
+                if col > max_col.saturating_sub(20) {
+                    // if this is one of the most recent samples
+                    is_clipping_now = true;
+                }
                 or_die(self.gfx.set_render_draw_color(WAVEFORM_CLIPPED_COLOR));
                 or_die(
                     self.gfx
-                        .render_line(x + col as f32, y, x + col as f32, y + height),
+                        .render_line(x + col as f32, y, x + col as f32, y + height - 1.0),
                 );
                 or_die(self.gfx.set_render_draw_color(waveform_color));
             } else {
@@ -253,6 +272,19 @@ impl UI {
         }
 
         if is_recording {
+            if is_clipping_now {
+                or_die(self.gfx.set_render_draw_color(WAVEFORM_CLIPPED_COLOR));
+
+                // render a thicker outline for clipping
+                for _ in 0..4 {
+                    or_die(self.gfx.render_rect(&rect));
+                    rect.x += 1.0;
+                    rect.y += 1.0;
+                    rect.w -= 2.0;
+                    rect.h -= 2.0;
+                }
+            }
+
             or_die(self.gfx.render_rect(&rect));
         }
     }

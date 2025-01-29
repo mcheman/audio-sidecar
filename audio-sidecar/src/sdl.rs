@@ -107,6 +107,10 @@ impl Gfx {
         ok_or_err(unsafe { SDL_RenderRect(self.renderer, rect) })
     }
 
+    pub fn render_point(&self, x: f32, y: f32) -> Result<(), String> {
+        ok_or_err(unsafe { SDL_RenderPoint(self.renderer, x, y) })
+    }
+
     pub fn render_line(&self, x1: f32, y1: f32, x2: f32, y2: f32) -> Result<(), String> {
         ok_or_err(unsafe { SDL_RenderLine(self.renderer, x1, y1, x2, y2) })
     }
