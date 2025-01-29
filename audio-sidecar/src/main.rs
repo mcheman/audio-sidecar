@@ -245,7 +245,7 @@ pub fn main() {
     let mut framespersec = 0.0;
     let mut start_sec = Instant::now();
 
-    let mut ui = UI::new();
+    let mut ui = UI::new(gfx);
     let mut input = Input::default();
 
     loop {
@@ -276,7 +276,7 @@ pub fn main() {
                     input.mouse_y = mouse_y;
                 }
                 Event::Quit(_) => {
-                    return save_and_quit(&gfx, encoder, logical_interface_id, audio_stream);
+                    return save_and_quit(&ui, encoder, logical_interface_id, audio_stream);
                 }
                 _ => continue,
             }
@@ -316,13 +316,11 @@ pub fn main() {
                 .collect();
         }
 
-        or_die(gfx.set_render_draw_color(53, 53, 53, 255));
-        or_die(gfx.render_clear());
+        ui.clear();
 
         const BORDER_SIZE: f32 = 10.0;
 
-        gui::draw_waveform(
-            &gfx,
+        ui.draw_waveform(
             &display_waveform,
             BORDER_SIZE,
             BORDER_SIZE,
@@ -330,8 +328,7 @@ pub fn main() {
             window_height as f32 - 100.0,
         );
 
-        gui::draw_text(
-            &gfx,
+        ui.draw_text(
             format!(
                 "Record Time: {}",
                 utils::format_duration(Duration::from_secs_f64(sample_count as f64 / 44100.0,))
@@ -347,7 +344,6 @@ pub fn main() {
         let button_width = 300.0;
         let button_height = 100.0 - BORDER_SIZE * 3.0;
         if ui.button(
-            &gfx,
             "Save Audio",
             window_width as f32 - BORDER_SIZE - button_width,
             window_height as f32 - BORDER_SIZE - button_height,
@@ -357,14 +353,13 @@ pub fn main() {
         {
             info!("pressed save audio button");
 
-            return save_and_quit(&gfx, encoder, logical_interface_id, audio_stream);
+            return save_and_quit(&ui, encoder, logical_interface_id, audio_stream);
         }
 
         // todo this button should be on the opposite side of the save/quit button to reduce accidental clicks closing the window
         let p_button_width = 100.0 - BORDER_SIZE * 3.0;
         let p_button_height = 100.0 - BORDER_SIZE * 3.0;
         if ui.button(
-            &gfx,
             if paused { "|>" } else { "||" },
             window_width as f32 - BORDER_SIZE - button_width - p_button_width - BORDER_SIZE,
             window_height as f32 - BORDER_SIZE - button_height,
@@ -402,9 +397,9 @@ pub fn main() {
             display_waveform.len() as f64 * 4.0 / 1024.0 / 1024.0
         )
         .as_str();
-        gui::debug_view(&gfx, debug_text.as_str());
+        ui.debug_view(debug_text.as_str());
 
-        or_die(gfx.render_present());
+        ui.present();
         frames += 1;
         frame_time = Instant::now();
 
@@ -417,7 +412,7 @@ pub fn main() {
 }
 
 fn save_and_quit(
-    gfx: &Gfx,
+    ui: &UI,
     encoder: Encoder,
     logical_interface_id: SDL_AudioDeviceID,
     audio_stream: *mut SDL_AudioStream,
@@ -443,7 +438,7 @@ fn save_and_quit(
     or_die(encoder.finish());
 
     info!("Audio saved");
-    gfx.hide_window();
+    ui.hide();
 
     let success_sound = match sdl::loadwav("success.wav") {
         Ok(a) => a,
