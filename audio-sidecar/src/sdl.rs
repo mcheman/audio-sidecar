@@ -83,8 +83,16 @@ pub fn create_window_and_renderer(
 }
 
 impl Gfx {
-    pub fn set_render_draw_color(&self, r: u8, g: u8, b: u8, a: u8) -> Result<(), String> {
-        ok_or_err(unsafe { SDL_SetRenderDrawColor(self.renderer, r, g, b, a) })
+    pub fn set_window_minimum_size(&self, width: u32, height: u32) -> Result<(), String> {
+        ok_or_err(unsafe { SDL_SetWindowMinimumSize(self.window, width as i32, height as i32) })
+    }
+
+    // pub fn set_render_draw_color(&self, r: u8, g: u8, b: u8, a: u8) -> Result<(), String> {
+    //     ok_or_err(unsafe { SDL_SetRenderDrawColor(self.renderer, r, g, b, a) })
+    // }
+
+    pub fn set_render_draw_color(&self, color: SDL_FColor) -> Result<(), String> {
+        ok_or_err(unsafe { SDL_SetRenderDrawColorFloat(self.renderer, color.r, color.g, color.b, color.a) })
     }
 
     pub fn render_clear(&self) -> Result<(), String> {

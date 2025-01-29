@@ -135,6 +135,10 @@ pub fn main() {
         die(format!("SDL vsync failed to enable: {}", msg).as_str());
     }
 
+    if let Err(msg) = gfx.set_window_minimum_size(400, 200) {
+        die(format!("SDL vsync failed to enable: {}", msg).as_str());
+    }
+
     let recording_devices = match sdl::get_audio_recording_devices() {
         Ok(a) => a,
         Err(msg) => die(format!("SDL finding audio recording devices failed: {}", msg).as_str()),
@@ -219,7 +223,7 @@ pub fn main() {
                 }
             }
             ExistingFileStrategy::Replace => {
-                // do nothing, the file will be replaced on save
+                // do nothing, the file will be replaced
                 // todo, move to trash or something first
             }
             _ => todo!(),
@@ -326,7 +330,23 @@ pub fn main() {
             BORDER_SIZE,
             window_width as f32 - BORDER_SIZE * 2.0,
             window_height as f32 - 100.0,
+            !paused,
         );
+
+        const CONTROL_HEIGHT: f32 = 100.0 - BORDER_SIZE * 3.0;
+        let control_start_y = window_height as f32 - CONTROL_HEIGHT - BORDER_SIZE;
+
+        let p_button_width = 220.0 - BORDER_SIZE * 3.0;
+        if ui.button(
+            if paused { "Record" } else { "Pause" },
+            BORDER_SIZE,
+            control_start_y,
+            p_button_width,
+            CONTROL_HEIGHT,
+        ) {
+            info!("pressed play/pause audio button");
+            paused = !paused;
+        }
 
         ui.draw_text(
             format!(
@@ -334,19 +354,19 @@ pub fn main() {
                 utils::format_duration(Duration::from_secs_f64(sample_count as f64 / 44100.0,))
             )
             .as_str(),
-            BORDER_SIZE,
-            window_height as f32 - (100.0 - BORDER_SIZE) / 2.0,
+            BORDER_SIZE + p_button_width + BORDER_SIZE,
+            control_start_y + (CONTROL_HEIGHT / 2.0),
             3.0,
             false,
             true,
         );
 
-        let button_width = 300.0;
+        let button_width = 200.0;
         let button_height = 100.0 - BORDER_SIZE * 3.0;
         if ui.button(
-            "Save Audio",
+            "Done",
             window_width as f32 - BORDER_SIZE - button_width,
-            window_height as f32 - BORDER_SIZE - button_height,
+            control_start_y,
             button_width,
             button_height,
         ) {
@@ -355,19 +375,7 @@ pub fn main() {
             return save_and_quit(&ui, encoder, logical_interface_id, audio_stream);
         }
 
-        // todo this button should be on the opposite side of the save/quit button to reduce accidental clicks closing the window
-        let p_button_width = 100.0 - BORDER_SIZE * 3.0;
-        let p_button_height = 100.0 - BORDER_SIZE * 3.0;
-        if ui.button(
-            if paused { "|>" } else { "||" },
-            window_width as f32 - BORDER_SIZE - button_width - p_button_width - BORDER_SIZE,
-            window_height as f32 - BORDER_SIZE - button_height,
-            p_button_width,
-            p_button_height,
-        ) {
-            info!("pressed play/pause audio button");
-            paused = !paused;
-        }
+
 
         // todo do a quick fade between paused sections of audio
 
@@ -381,21 +389,21 @@ pub fn main() {
             max_frame_time = elapsed;
         }
 
-        // todo toggle debug text on and off through config file
-        let mut debug_text = format!("frametime: {:.2}ms\n", max_frame_time * 1000.0);
-        debug_text += format!("fps: {}\n", framespersec).as_str();
-        debug_text += format!("samples: {}\n", sample_count).as_str();
-        debug_text += format!(
-            "data size: {:.1}MiB\n",
-            sample_count as f64 * 4.0 / 1024.0 / 1024.0
-        )
-        .as_str();
-        debug_text += format!(
-            "waveform size: {:.1}MiB\n",
-            display_waveform.len() as f64 * 4.0 / 1024.0 / 1024.0
-        )
-        .as_str();
-        ui.debug_view(debug_text.as_str());
+        // // todo toggle debug text on and off through config file
+        // let mut debug_text = format!("frametime: {:.2}ms\n", max_frame_time * 1000.0);
+        // debug_text += format!("fps: {}\n", framespersec).as_str();
+        // debug_text += format!("samples: {}\n", sample_count).as_str();
+        // debug_text += format!(
+        //     "data size: {:.1}MiB\n",
+        //     sample_count as f64 * 4.0 / 1024.0 / 1024.0
+        // )
+        // .as_str();
+        // debug_text += format!(
+        //     "waveform size: {:.1}MiB\n",
+        //     display_waveform.len() as f64 * 4.0 / 1024.0 / 1024.0
+        // )
+        // .as_str();
+        // ui.debug_view(debug_text.as_str());
 
         ui.present();
         frames += 1;

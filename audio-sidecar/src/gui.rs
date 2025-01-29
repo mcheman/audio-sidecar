@@ -1,7 +1,71 @@
 use crate::sdl::Gfx;
 use crate::utils::or_die;
-use sdl3_sys::everything::SDL_FRect;
+use sdl3_sys::everything::{SDL_FColor, SDL_FRect};
 use std::cmp::max;
+
+const BACKGROUND_COLOR: SDL_FColor = SDL_FColor {
+    r: 0.207,
+    g: 0.207,
+    b: 0.207,
+    a: 1.0,
+};
+
+const WAVEFORM_BACKGROUND_COLOR: SDL_FColor = SDL_FColor {
+    r: 0.169,
+    g: 0.169,
+    b: 0.169,
+    a: 1.0,
+};
+
+const WAVEFORM_BACKGROUND_PAUSED_COLOR: SDL_FColor = SDL_FColor {
+    r: 0.247,
+    g: 0.247,
+    b: 0.247,
+    a: 1.0,
+};
+
+const WAVEFORM_COLOR: SDL_FColor = SDL_FColor {
+    r: 0.225,
+    g: 0.621,
+    b: 1.0,
+    a: 1.0,
+};
+
+const WAVEFORM_PAUSED_COLOR: SDL_FColor = SDL_FColor {
+    r: 0.784,
+    g: 0.784,
+    b: 0.784,
+    a: 1.0,
+};
+
+const WAVEFORM_CLIPPED_COLOR: SDL_FColor = SDL_FColor {
+    r: 1.0,
+    g: 0.2,
+    b: 0.2,
+    a: 1.0,
+};
+
+const TEXT_COLOR: SDL_FColor = SDL_FColor {
+    r: 1.0,
+    g: 1.0,
+    b: 1.0,
+    a: 1.0,
+};
+
+const BUTTON_COLOR: SDL_FColor = SDL_FColor {
+    r: 0.31,
+    g: 0.31,
+    b: 0.31,
+    a: 1.0,
+};
+const BUTTON_HOVER_COLOR: SDL_FColor = WAVEFORM_COLOR;
+
+const BUTTON_CLICKED_COLOR: SDL_FColor = SDL_FColor {
+    r: 0.0,
+    g: 0.354,
+    b: 0.698,
+    a: 1.0,
+};
 
 // contains the events that occurred this frame
 pub struct UI {
@@ -45,7 +109,7 @@ impl UI {
     }
 
     pub fn clear(&self) {
-        or_die(self.gfx.set_render_draw_color(53, 53, 53, 255));
+        or_die(self.gfx.set_render_draw_color(BACKGROUND_COLOR));
         or_die(self.gfx.render_clear());
     }
 
@@ -63,6 +127,10 @@ impl UI {
         !self.state.mouse_button_pressed && self.prev_state.mouse_button_pressed
     }
 
+    fn is_clicking(&self) -> bool {
+        self.state.mouse_button_pressed
+    }
+
     // returns true if button is currently clicked
     pub fn button(&self, text: &str, x: f32, y: f32, width: f32, height: f32) -> bool {
         let mouse_colliding = self.state.mouse_x > x
@@ -70,18 +138,21 @@ impl UI {
             && self.state.mouse_y > y
             && self.state.mouse_y < y + height;
 
-        if mouse_colliding && self.click_occurred() {
-            or_die(self.gfx.set_render_draw_color(20, 20, 20, 255));
+        let mut y_offset = 0.0;
+
+        if mouse_colliding && self.is_clicking() {
+            or_die(self.gfx.set_render_draw_color(BUTTON_CLICKED_COLOR));
+            y_offset = 4.0;
         } else if mouse_colliding {
             // hover state
-            or_die(self.gfx.set_render_draw_color(80, 90, 90, 255));
+            or_die(self.gfx.set_render_draw_color(BUTTON_HOVER_COLOR));
         } else {
-            or_die(self.gfx.set_render_draw_color(80, 80, 80, 255));
+            or_die(self.gfx.set_render_draw_color(BUTTON_COLOR));
         }
 
         let rect = SDL_FRect {
             x,
-            y,
+            y: y + y_offset,
             w: width,
             h: height,
         };
@@ -89,9 +160,11 @@ impl UI {
         or_die(self.gfx.render_fill_rect(&rect));
 
         // button text
-        or_die(self.gfx.set_render_draw_color(255, 255, 255, 255));
+        or_die(self.gfx.set_render_draw_color(TEXT_COLOR));
 
-        self.draw_text(text, x + width / 2.0, y + height / 2.0, 3.0, true, true);
+
+
+        self.draw_text(text, x + width / 2.0, y + height / 2.0 + y_offset, 3.0, true, true);
 
         mouse_colliding && self.click_occurred()
     }
@@ -126,8 +199,20 @@ impl UI {
         or_die(self.gfx.set_render_scale(1.0, 1.0));
     }
 
-    pub fn draw_waveform(&self, waveform: &[u32], x: f32, y: f32, width: f32, height: f32) {
-        or_die(self.gfx.set_render_draw_color(43, 43, 43, 255));
+    pub fn draw_waveform(
+        &self,
+        waveform: &[u32],
+        x: f32,
+        y: f32,
+        width: f32,
+        height: f32,
+        is_recording: bool,
+    ) {
+        let background_color = if is_recording {WAVEFORM_BACKGROUND_COLOR} else {WAVEFORM_BACKGROUND_PAUSED_COLOR};
+        let waveform_color = if is_recording {WAVEFORM_COLOR} else {WAVEFORM_PAUSED_COLOR};
+
+        or_die(self.gfx.set_render_draw_color(background_color));
+
         let rect = SDL_FRect {
             x,
             y,
@@ -136,7 +221,8 @@ impl UI {
         };
         or_die(self.gfx.render_fill_rect(&rect));
 
-        or_die(self.gfx.set_render_draw_color(255, 255, 255, 255));
+        or_die(self.gfx.set_render_draw_color(waveform_color));
+
 
         // todo render the new audio to a buffer which can then be scrolled on the screen, rather than line rendering the whole waveform
 
@@ -152,12 +238,12 @@ impl UI {
         {
             // if clipped, draw as red
             if *m >= MAX_AMPLITUDE - 1 {
-                or_die(self.gfx.set_render_draw_color(250, 43, 43, 255));
+                or_die(self.gfx.set_render_draw_color(WAVEFORM_CLIPPED_COLOR));
                 or_die(
                     self.gfx
                         .render_line(x + col as f32, y, x + col as f32, y + height),
                 );
-                or_die(self.gfx.set_render_draw_color(255, 255, 255, 255));
+                or_die(self.gfx.set_render_draw_color(waveform_color));
             } else {
                 let h = *m as f32 * max_conversion_factor;
                 let y1 = y_middle - (h / 2.0);
