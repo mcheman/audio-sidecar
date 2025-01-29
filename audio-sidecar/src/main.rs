@@ -336,7 +336,7 @@ pub fn main() {
         const CONTROL_HEIGHT: f32 = 100.0 - BORDER_SIZE * 3.0;
         let control_start_y = window_height as f32 - CONTROL_HEIGHT - BORDER_SIZE;
 
-        let p_button_width = 220.0 - BORDER_SIZE * 3.0;
+        let p_button_width = 180.0;
         if ui.button(
             if paused { "Record" } else { "Pause" },
             BORDER_SIZE,
@@ -354,14 +354,14 @@ pub fn main() {
                 utils::format_duration(Duration::from_secs_f64(sample_count as f64 / 44100.0,))
             )
             .as_str(),
-            BORDER_SIZE + p_button_width + BORDER_SIZE,
+            BORDER_SIZE + p_button_width + BORDER_SIZE * 2.0,
             control_start_y + (CONTROL_HEIGHT / 2.0),
             3.0,
             false,
             true,
         );
 
-        let button_width = 200.0;
+        let button_width = 180.0;
         let button_height = 100.0 - BORDER_SIZE * 3.0;
         if ui.button(
             "Done",
@@ -374,8 +374,6 @@ pub fn main() {
 
             return save_and_quit(&ui, encoder, logical_interface_id, audio_stream);
         }
-
-
 
         // todo do a quick fade between paused sections of audio
 

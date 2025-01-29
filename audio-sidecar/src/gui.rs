@@ -251,6 +251,10 @@ impl UI {
                 or_die(self.gfx.render_line(x + col as f32, y1, x + col as f32, y2));
             }
         }
+
+        if is_recording {
+            or_die(self.gfx.render_rect(&rect));
+        }
     }
 
     pub fn debug_view(&self, text: &str) {
