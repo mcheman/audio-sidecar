@@ -4,7 +4,8 @@ extern crate sdl3_sys;
 use self::config::ExistingFileStrategy;
 use crate::config::ProgramConfig;
 use crate::flac::Encoder;
-use crate::sdl::{Event, Gfx};
+use crate::gui::{Input, UI};
+use crate::sdl::Event;
 use crate::utils::die;
 use crate::utils::or_die;
 use log::{debug, error, info};
@@ -19,7 +20,6 @@ use tracing::Level;
 use tracing_subscriber::fmt::writer::MakeWriterExt;
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::{fmt, layer::SubscriberExt};
-use crate::gui::{Input, UI};
 
 mod config;
 mod flac;
@@ -348,9 +348,8 @@ pub fn main() {
             window_width as f32 - BORDER_SIZE - button_width,
             window_height as f32 - BORDER_SIZE - button_height,
             button_width,
-            button_height
-        )
-        {
+            button_height,
+        ) {
             info!("pressed save audio button");
 
             return save_and_quit(&ui, encoder, logical_interface_id, audio_stream);
@@ -364,9 +363,8 @@ pub fn main() {
             window_width as f32 - BORDER_SIZE - button_width - p_button_width - BORDER_SIZE,
             window_height as f32 - BORDER_SIZE - button_height,
             p_button_width,
-            p_button_height
-        )
-        {
+            p_button_height,
+        ) {
             info!("pressed play/pause audio button");
             paused = !paused;
         }

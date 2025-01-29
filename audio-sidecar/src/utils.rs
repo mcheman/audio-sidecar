@@ -1,5 +1,5 @@
-use std::time::Duration;
 use log::error;
+use std::time::Duration;
 
 pub fn format_duration(duration: Duration) -> String {
     let seconds = duration.as_secs_f64();

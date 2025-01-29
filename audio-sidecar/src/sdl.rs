@@ -2,7 +2,7 @@ use sdl3_sys::everything::*;
 use sdl3_sys::init::SDL_InitFlags;
 use std::cmp::min;
 use std::ffi::{CStr, CString};
-use std::{ptr};
+use std::ptr;
 
 const AUDIO_SPEC: SDL_AudioSpec = SDL_AudioSpec {
     channels: 1,
@@ -18,11 +18,15 @@ pub struct Gfx {
 impl Drop for Gfx {
     fn drop(&mut self) {
         if !self.renderer.is_null() {
-            unsafe { SDL_DestroyRenderer(self.renderer); }
+            unsafe {
+                SDL_DestroyRenderer(self.renderer);
+            }
         }
 
         if !self.window.is_null() {
-            unsafe { SDL_DestroyWindow(self.window); }
+            unsafe {
+                SDL_DestroyWindow(self.window);
+            }
         }
     }
 }
@@ -123,10 +127,15 @@ impl Gfx {
         ok_or_err(unsafe { SDL_SetRenderScale(self.renderer, x_scale, y_scale) })
     }
 
-    pub fn hide_window(&self) { // todo handle return value
-        unsafe { SDL_HideWindow(self.window); }
+    pub fn hide_window(&self) {
+        // todo handle return value
+        unsafe {
+            SDL_HideWindow(self.window);
+        }
     }
 }
+
+// unsafe {SDL_SetWindowOpacity(gfx.window, 0.5)};
 
 pub struct AudioDevice {
     pub id: SDL_AudioDeviceID,
@@ -179,15 +188,23 @@ pub fn loadwav(path: &str) -> Result<Sound, String> {
 // todo this level of abstraction does not belong here, also fix the safety
 pub fn play_sound(sound: &Sound) {
     unsafe {
-        let stream = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &sound.audio_spec, SDL_AudioStreamCallback::None, ptr::null_mut());
-        SDL_PutAudioStreamData(stream, sound.data.as_ptr().cast(), (sound.data.len() * 4) as i32);
+        let stream = SDL_OpenAudioDeviceStream(
+            SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK,
+            &sound.audio_spec,
+            SDL_AudioStreamCallback::None,
+            ptr::null_mut(),
+        );
+        SDL_PutAudioStreamData(
+            stream,
+            sound.data.as_ptr().cast(),
+            (sound.data.len() * 4) as i32,
+        );
         SDL_SetAudioStreamGain(stream, 0.2);
         SDL_ResumeAudioStreamDevice(stream);
 
         let seconds = sound.data.len() as f64 / 44100.0;
 
         std::thread::sleep(std::time::Duration::from_secs_f64(seconds));
-
     }
 }
 

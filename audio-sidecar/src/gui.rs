@@ -27,12 +27,14 @@ impl Default for Input {
     }
 }
 
+// todo for panels and nesting, consider an api similar to https://github.com/emilk/egui/blob/master/crates/egui_demo_lib/src/demo/panels.rs
+
 impl UI {
     pub fn new(gfx: Gfx) -> Self {
         UI {
             state: Input::default(),
             prev_state: Input::default(),
-            gfx
+            gfx,
         }
     }
 
@@ -46,11 +48,11 @@ impl UI {
         or_die(self.gfx.set_render_draw_color(53, 53, 53, 255));
         or_die(self.gfx.render_clear());
     }
-    
+
     pub fn present(&self) {
         or_die(self.gfx.render_present());
     }
-    
+
     pub fn hide(&self) {
         self.gfx.hide_window();
     }
@@ -89,14 +91,7 @@ impl UI {
         // button text
         or_die(self.gfx.set_render_draw_color(255, 255, 255, 255));
 
-        self.draw_text(
-            text,
-            x + width / 2.0,
-            y + height / 2.0,
-            3.0,
-            true,
-            true,
-        );
+        self.draw_text(text, x + width / 2.0, y + height / 2.0, 3.0, true, true);
 
         mouse_colliding && self.click_occurred()
     }
@@ -123,7 +118,10 @@ impl UI {
         };
         let offset_y = if centered_y { GLYPH_SIZE / 2.0 } else { 0.0 };
 
-        or_die(self.gfx.render_debug_text(text, x / size - offset_x, y / size - offset_y));
+        or_die(
+            self.gfx
+                .render_debug_text(text, x / size - offset_x, y / size - offset_y),
+        );
 
         or_die(self.gfx.set_render_scale(1.0, 1.0));
     }
@@ -155,7 +153,10 @@ impl UI {
             // if clipped, draw as red
             if *m >= MAX_AMPLITUDE - 1 {
                 or_die(self.gfx.set_render_draw_color(250, 43, 43, 255));
-                or_die(self.gfx.render_line(x + col as f32, y, x + col as f32, y + height));
+                or_die(
+                    self.gfx
+                        .render_line(x + col as f32, y, x + col as f32, y + height),
+                );
                 or_die(self.gfx.set_render_draw_color(255, 255, 255, 255));
             } else {
                 let h = *m as f32 * max_conversion_factor;
@@ -178,5 +179,3 @@ impl UI {
         }
     }
 }
-
-

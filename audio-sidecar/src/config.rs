@@ -1,5 +1,5 @@
-use std::str::FromStr;
 use config::{Config, FileFormat};
+use std::str::FromStr;
 
 pub struct ProgramConfig {
     pub interface: String, // search string for the audio interface to use
