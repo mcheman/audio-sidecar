@@ -265,7 +265,8 @@ pub fn get_audio_stream_data_i32(stream: *mut SDL_AudioStream) -> Result<Vec<i32
         let samples_read = (bytes_read / 4) as usize;
 
         for i in 0..(min(sample_buffer.len(), samples_read)) {
-            samples.push(sample_buffer[i]);
+            // clip audio to 24 bits by removing quietest 8 bits
+            samples.push(sample_buffer[i] >> 8);
         }
     }
 

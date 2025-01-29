@@ -2,14 +2,12 @@ extern crate flac_sys;
 extern crate sdl3_sys;
 
 use crate::sdl::{Event, Gfx};
-use config::{Config, FileFormat};
 use log::{debug, error, info};
 use sdl3_sys::everything::*;
-use std::cmp::max;
 use std::path::Path;
 use std::process::exit;
 use std::str::FromStr;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use std::{env, io, panic};
 use std::any::Any;
 use std::backtrace::Backtrace;
@@ -17,23 +15,17 @@ use tracing::Level;
 use tracing_subscriber::fmt::writer::MakeWriterExt;
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::{fmt, layer::SubscriberExt};
+use crate::config::ProgramConfig;
 use crate::flac::Encoder;
+use crate::utils::or_die;
+use crate::utils::die;
+use self::config::ExistingFileStrategy;
 
 mod flac;
 mod sdl;
-
-fn die(s: &str) -> ! {
-    error!("{}", s);
-    sdl::quit();
-    panic!();
-}
-
-fn or_die(result: Result<(), String>) {
-    if let Err(msg) = result {
-        die(format!("Something weird happened becausee a function that should not have failed has failed: {}", msg).as_str());
-    }
-}
-
+mod utils;
+mod gui;
+mod config;
 // todo copious error checking
 // todo save performance stats and/or performance stats outside of normal
 // todo if audio is for an image, load a thumbnail and display it so it's clearer which file the audio will be associated with. Loading thumbnails rather than the image itself should be both faster and have fewer file formats to deal with. We could even try to load _any_ thumbnail that matches the file in question, say for video files, since we'll only care if there _is_ one. See https://askubuntu.com/questions/1368910/how-to-create-custom-thumbnailers-for-nautilus-nemo-and-caja and https://specifications.freedesktop.org/thumbnail-spec/latest/thumbsave.html
@@ -71,202 +63,6 @@ fn or_die(result: Result<(), String>) {
 // todo enforce minimum window size to avoid losing the window if it's resized to tiny size
 // todo add sdl3_ttf via bindgen ffi like with libFLAC
 // todo build action in ci with auto released artifacts?
-
-#[derive(Debug, PartialEq)]
-enum ExistingFileStrategy {
-    RenameToLast,
-    RenameToFirst,
-    Append,
-    Replace,
-    Ask,
-}
-
-impl FromStr for ExistingFileStrategy {
-    type Err = ();
-    fn from_str(s: &str) -> Result<ExistingFileStrategy, ()> {
-        match s {
-            "rename-to-last" => Ok(ExistingFileStrategy::RenameToLast),
-            "rename-to-first" => Ok(ExistingFileStrategy::RenameToFirst),
-            "append" => Ok(ExistingFileStrategy::Append),
-            "replace" => Ok(ExistingFileStrategy::Replace),
-            "ask" => Ok(ExistingFileStrategy::Ask),
-            _ => Err(()),
-        }
-    }
-}
-
-struct ProgramConfig {
-    interface: String, // search string for the audio interface to use
-    window_width: u32,
-    window_height: u32,
-    log_file: String,
-    log_level: String,
-    existing_file_strategy: ExistingFileStrategy,
-}
-
-impl ProgramConfig {
-    fn from_file() -> Result<ProgramConfig, String> {
-        let settings = Config::builder()
-            .add_source(config::File::new(
-                "./audio-sidecar-config",
-                FileFormat::Toml,
-            ))
-            .build()
-            .unwrap(); // todo this should have defaults and not panic if config file doesn't exist
-
-        let interface: String = settings.get("Interface").unwrap_or(String::from(""));
-        let window_width: u32 = settings.get("WindowWidth").unwrap_or(1200);
-        let window_height: u32 = settings.get("WindowHeight").unwrap_or(600);
-        let log_file: String = settings
-            .get("LogFile")
-            .unwrap_or(String::from("audioSidecar.log"));
-        let log_level: String = settings.get("LogLevel").unwrap_or(String::from("debug"));
-
-        let existing_file_strategy = ExistingFileStrategy::from_str(
-            settings
-                .get("ExistingFileStrategy")
-                .unwrap_or(String::from(""))
-                .as_str(),
-        )
-        .unwrap_or(ExistingFileStrategy::RenameToLast);
-
-        Ok(ProgramConfig {
-            interface,
-            window_width,
-            window_height,
-            log_file,
-            log_level,
-            existing_file_strategy,
-        })
-    }
-}
-
-fn format_duration(duration: Duration) -> String {
-    let seconds = duration.as_secs_f64();
-
-    let minutes = (seconds / 60.0).floor();
-    let seconds = seconds % 60.0;
-
-    let hours = (minutes / 60.0).floor();
-    let minutes = minutes % 60.0;
-
-    if hours > 0.0 {
-        format!("{}h {}m {:.1}s", hours, minutes, seconds)
-    } else if minutes > 0.0 {
-        format!("{}m {:.1}s", minutes, seconds)
-    } else {
-        format!("{:.1}s", seconds)
-    }
-}
-
-fn draw_waveform(gfx: &Gfx, waveform: &[u32], x: f32, y: f32, width: f32, height: f32) {
-    or_die(gfx.set_render_draw_color(43, 43, 43, 255));
-    let rect = SDL_FRect {
-        x,
-        y,
-        w: width,
-        h: height,
-    };
-    or_die(gfx.render_fill_rect(&rect));
-
-    or_die(gfx.set_render_draw_color(255, 255, 255, 255));
-
-    // todo put this in its own handler widget thing which only renders the new audio to a buffer which can then be scrolled on the screen, rather than line rendering the whole waveform
-
-    const MAX_AMPLITUDE: u32 = (i32::MAX >> 8) as u32; // 24bits
-
-    let chunks_to_render = width; // one chunk per pixel
-    for (col, m) in waveform
-        .iter()
-        .skip(max(0, waveform.len() as i64 - chunks_to_render as i64) as usize)
-        .enumerate()
-    {
-        let is_clipped = *m >= MAX_AMPLITUDE - 1;
-
-        let h = *m as f32 * (height / MAX_AMPLITUDE as f32);
-        let y1 = y + (height / 2.0) - (h / 2.0);
-        let y2 = y1 + h;
-
-        if is_clipped {
-            or_die(gfx.set_render_draw_color(250, 43, 43, 255));
-        }
-
-        or_die(gfx.render_line(x + col as f32, y1, x + col as f32, y2));
-
-        if is_clipped {
-            or_die(gfx.set_render_draw_color(255, 255, 255, 255));
-        }
-    }
-}
-
-fn draw_text(gfx: &Gfx, text: &str, x: f32, y: f32, size: f32, centered_x: bool, centered_y: bool) {
-    or_die(gfx.set_render_scale(size, size));
-
-    const GLYPH_SIZE: f32 = 8.0;
-
-    let offset_x = if centered_x {
-        // note that bitmapped 8x8 pixel font generally has 2 pixels of empty space on the right and 1 pixel of space on the bottom
-        //   we subtract 1 pixel here to compensate. subtracting 0.5 pixels from Y results in mushed scaling so we don't do that
-        (text.len() as f32 * GLYPH_SIZE) / 2.0 - 1.0
-    } else {
-        0.0
-    };
-    let offset_y = if centered_y { GLYPH_SIZE / 2.0 } else { 0.0 };
-
-    or_die(gfx.render_debug_text(text, x / size - offset_x, y / size - offset_y));
-
-    or_die(gfx.set_render_scale(1.0, 1.0));
-}
-
-// returns true if button is currently clicked
-fn button(
-    gfx: &Gfx,
-    text: &str,
-    x: f32,
-    y: f32,
-    width: f32,
-    height: f32,
-    mouse_x: f32,
-    mouse_y: f32,
-    clicked: bool,
-) -> bool {
-    let mouse_colliding = mouse_x > x && mouse_x < x + width && mouse_y > y && mouse_y < y + height;
-
-    if mouse_colliding && clicked {
-        or_die(gfx.set_render_draw_color(20, 20, 20, 255));
-    } else if mouse_colliding {
-        // hover state
-        or_die(gfx.set_render_draw_color(80, 90, 90, 255));
-    } else {
-        or_die(gfx.set_render_draw_color(80, 80, 80, 255));
-    }
-
-    let rect = SDL_FRect {
-        x,
-        y,
-        w: width,
-        h: height,
-    };
-
-    or_die(gfx.render_fill_rect(&rect));
-
-    // button text
-    or_die(gfx.set_render_draw_color(255, 255, 255, 255));
-
-    draw_text(
-        &gfx,
-        text,
-        x + width / 2.0,
-        y + height / 2.0,
-        3.0,
-        true,
-        true,
-    );
-
-    // todo only emit click when mouse button is released
-
-    mouse_colliding && clicked
-}
 
 // redirect panics to log file. woe is me if this panics within the logger itself
 fn handle_panic(payload: &(dyn Any + Send), backtrace: Backtrace) {
@@ -448,6 +244,14 @@ pub fn main() {
     };
 
 
+    let mut frame_time = Instant::now();
+    let mut max_time = Instant::now();
+    let mut max_frame_time = 0.0;
+
+    let mut frames = 0;
+    let mut framespersec = 0.0;
+    let mut start_sec = Instant::now();
+
 
     loop {
         // poll until all events are handled and the queue runs dry
@@ -493,11 +297,6 @@ pub fn main() {
 
 
         if !paused {
-            // clip audio to 24 bits by removing quietest 8 bits
-            for s in samples.iter_mut() {
-                *s >>= 8;
-            }
-
             sample_count += samples.len() as u64;
 
             or_die(encoder.encode(&samples)); // encode and save to file as we go
@@ -529,7 +328,7 @@ pub fn main() {
 
         const BORDER_SIZE: f32 = 10.0;
 
-        draw_waveform(
+        gui::draw_waveform(
             &gfx,
             &display_waveform,
             BORDER_SIZE,
@@ -538,11 +337,11 @@ pub fn main() {
             window_height as f32 - 100.0,
         );
 
-        draw_text(
+        gui::draw_text(
             &gfx,
             format!(
                 "Record Time: {}",
-                format_duration(Duration::from_secs_f64(
+                utils::format_duration(Duration::from_secs_f64(
                     sample_count as f64 / 44100.0,
                 ))
             )
@@ -556,7 +355,7 @@ pub fn main() {
 
         let button_width = 300.0;
         let button_height = 100.0 - BORDER_SIZE * 3.0;
-        if button(
+        if gui::button(
             &gfx,
             "Save Audio",
             window_width as f32 - BORDER_SIZE - button_width,
@@ -582,7 +381,7 @@ pub fn main() {
 
         let p_button_width = 100.0 - BORDER_SIZE * 3.0;
         let p_button_height = 100.0 - BORDER_SIZE * 3.0;
-        if button(
+        if gui::button(
             &gfx,
             if paused { "|>" } else { "||" },
             window_width as f32 - BORDER_SIZE - button_width - p_button_width - BORDER_SIZE,
@@ -606,7 +405,27 @@ pub fn main() {
             is_clicking_save = false;
         }
 
+
+
+        if max_time.elapsed().as_secs_f64() > 5.0 {
+            max_frame_time = 0.0;
+            max_time = Instant::now();
+        }
+
+        let elapsed = frame_time.elapsed().as_secs_f64();
+        if elapsed > max_frame_time {
+            max_frame_time = elapsed;
+        }
+        gui::draw_text(&gfx, format!("frametime: {:.2}ms fps: {}", max_frame_time * 1000.0, framespersec).as_str(), BORDER_SIZE, BORDER_SIZE, 1.0, false, false);
         or_die(gfx.render_present());
+        frames += 1;
+        frame_time = Instant::now();
+
+        if start_sec.elapsed().as_secs_f64() > 1.0 {
+            start_sec = Instant::now();
+            framespersec = frames as f64;
+            frames = 0;
+        }
     }
 }
 
@@ -626,14 +445,10 @@ fn save_and_quit(
     sdl::close_audio_device(logical_interface_id);
 
     // get last bit of audio
-    let mut samples = match sdl::get_audio_stream_data_i32(audio_stream) {
+    let samples = match sdl::get_audio_stream_data_i32(audio_stream) {
         Ok(s) => s,
         Err(msg) => die(format!("SDL GetAudioStreamData failed: {}", msg).as_str()),
     };
-    // clip audio to 24 bits by removing quietest 8 bits
-    for s in samples.iter_mut() {
-        *s >>= 8;
-    }
 
     debug!("Finalizing audio to disk...");
 
@@ -649,7 +464,7 @@ fn save_and_quit(
     };
 
     debug!("Playing success sound...");
-    sdl::play_sound(&success_sound);
+    sdl::play_sound(&success_sound); // todo make configurable
 
     sdl::quit();
 
