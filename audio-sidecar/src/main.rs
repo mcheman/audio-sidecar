@@ -1,31 +1,31 @@
 extern crate flac_sys;
 extern crate sdl3_sys;
 
+use self::config::ExistingFileStrategy;
+use crate::config::ProgramConfig;
+use crate::flac::Encoder;
 use crate::sdl::{Event, Gfx};
+use crate::utils::die;
+use crate::utils::or_die;
 use log::{debug, error, info};
 use sdl3_sys::everything::*;
+use std::any::Any;
+use std::backtrace::Backtrace;
 use std::path::Path;
 use std::process::exit;
 use std::str::FromStr;
 use std::time::{Duration, Instant};
 use std::{env, io, panic};
-use std::any::Any;
-use std::backtrace::Backtrace;
 use tracing::Level;
 use tracing_subscriber::fmt::writer::MakeWriterExt;
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::{fmt, layer::SubscriberExt};
-use crate::config::ProgramConfig;
-use crate::flac::Encoder;
-use crate::utils::or_die;
-use crate::utils::die;
-use self::config::ExistingFileStrategy;
 
+mod config;
 mod flac;
+mod gui;
 mod sdl;
 mod utils;
-mod gui;
-mod config;
 // todo copious error checking
 // todo save performance stats and/or performance stats outside of normal
 // todo if audio is for an image, load a thumbnail and display it so it's clearer which file the audio will be associated with. Loading thumbnails rather than the image itself should be both faster and have fewer file formats to deal with. We could even try to load _any_ thumbnail that matches the file in question, say for video files, since we'll only care if there _is_ one. See https://askubuntu.com/questions/1368910/how-to-create-custom-thumbnailers-for-nautilus-nemo-and-caja and https://specifications.freedesktop.org/thumbnail-spec/latest/thumbsave.html
@@ -189,9 +189,7 @@ pub fn main() {
     let mut is_clicking_save = false;
     let mut is_clicking_pause = false;
 
-    let mut sample_count= 0u64;
-
-
+    let mut sample_count = 0u64;
 
     let filename_base = filepath
         .with_extension("")
@@ -243,7 +241,6 @@ pub fn main() {
         Err(msg) => die(msg.as_str()),
     };
 
-
     let mut frame_time = Instant::now();
     let mut max_time = Instant::now();
     let mut max_frame_time = 0.0;
@@ -251,7 +248,6 @@ pub fn main() {
     let mut frames = 0;
     let mut framespersec = 0.0;
     let mut start_sec = Instant::now();
-
 
     loop {
         // poll until all events are handled and the queue runs dry
@@ -278,12 +274,7 @@ pub fn main() {
                     }
                 }
                 Event::Quit(_) => {
-                    save_and_quit(
-                        &gfx,
-                        encoder,
-                        logical_interface_id,
-                        audio_stream,
-                    );
+                    return save_and_quit(&gfx, encoder, logical_interface_id, audio_stream);
                 }
                 _ => continue,
             }
@@ -293,8 +284,6 @@ pub fn main() {
             Ok(s) => s,
             Err(msg) => die(format!("SDL GetAudioStreamData failed: {}", msg).as_str()),
         };
-
-
 
         if !paused {
             sample_count += samples.len() as u64;
@@ -341,9 +330,7 @@ pub fn main() {
             &gfx,
             format!(
                 "Record Time: {}",
-                utils::format_duration(Duration::from_secs_f64(
-                    sample_count as f64 / 44100.0,
-                ))
+                utils::format_duration(Duration::from_secs_f64(sample_count as f64 / 44100.0,))
             )
             .as_str(),
             BORDER_SIZE,
@@ -371,12 +358,7 @@ pub fn main() {
 
             is_clicking_save = true;
 
-            save_and_quit(
-                &gfx,
-                encoder,
-                logical_interface_id,
-                audio_stream,
-            );
+            return save_and_quit(&gfx, encoder, logical_interface_id, audio_stream);
         }
 
         let p_button_width = 100.0 - BORDER_SIZE * 3.0;
@@ -405,8 +387,6 @@ pub fn main() {
             is_clicking_save = false;
         }
 
-
-
         if max_time.elapsed().as_secs_f64() > 5.0 {
             max_frame_time = 0.0;
             max_time = Instant::now();
@@ -416,7 +396,20 @@ pub fn main() {
         if elapsed > max_frame_time {
             max_frame_time = elapsed;
         }
-        gui::draw_text(&gfx, format!("frametime: {:.2}ms fps: {}", max_frame_time * 1000.0, framespersec).as_str(), BORDER_SIZE, BORDER_SIZE, 1.0, false, false);
+        gui::draw_text(
+            &gfx,
+            format!(
+                "frametime: {:.2}ms fps: {}",
+                max_frame_time * 1000.0,
+                framespersec
+            )
+            .as_str(),
+            BORDER_SIZE,
+            BORDER_SIZE,
+            1.0,
+            false,
+            false,
+        );
         or_die(gfx.render_present());
         frames += 1;
         frame_time = Instant::now();
@@ -434,7 +427,7 @@ fn save_and_quit(
     encoder: Encoder,
     logical_interface_id: SDL_AudioDeviceID,
     audio_stream: *mut SDL_AudioStream,
-) -> ! {
+) {
     info!("Shutdown triggered");
 
     debug!("Capturing final audio samples...");
@@ -470,5 +463,5 @@ fn save_and_quit(
 
     info!("============= Exited =============");
 
-    exit(0);
+    // exit(0); // todo avoid exiting the program with exit() to allow things to drop, etc.
 }

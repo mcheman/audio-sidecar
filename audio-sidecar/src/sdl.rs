@@ -3,6 +3,7 @@ use sdl3_sys::init::SDL_InitFlags;
 use std::cmp::min;
 use std::ffi::{CStr, CString};
 use std::{ptr};
+use log::debug;
 
 const AUDIO_SPEC: SDL_AudioSpec = SDL_AudioSpec {
     channels: 1,
@@ -13,6 +14,18 @@ const AUDIO_SPEC: SDL_AudioSpec = SDL_AudioSpec {
 pub struct Gfx {
     window: *mut SDL_Window,
     renderer: *mut SDL_Renderer,
+}
+
+impl Drop for Gfx {
+    fn drop(&mut self) {
+        if !self.renderer.is_null() {
+            unsafe { SDL_DestroyRenderer(self.renderer); }
+        }
+
+        if !self.window.is_null() {
+            unsafe { SDL_DestroyWindow(self.window); }
+        }
+    }
 }
 
 fn ok_or_err(is_ok: bool) -> Result<(), String> {
