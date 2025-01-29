@@ -3,7 +3,6 @@ use sdl3_sys::init::SDL_InitFlags;
 use std::cmp::min;
 use std::ffi::{CStr, CString};
 use std::{ptr};
-use log::debug;
 
 const AUDIO_SPEC: SDL_AudioSpec = SDL_AudioSpec {
     channels: 1,
@@ -94,6 +93,9 @@ impl Gfx {
 
     pub fn render_line(&self, x1: f32, y1: f32, x2: f32, y2: f32) -> Result<(), String> {
         ok_or_err(unsafe { SDL_RenderLine(self.renderer, x1, y1, x2, y2) })
+    }
+    pub fn render_lines(&self, lines: Vec<SDL_FPoint>) -> Result<(), String> {
+        ok_or_err(unsafe { SDL_RenderLines(self.renderer, lines.as_ptr(), lines.len() as i32) })
     }
 
     pub fn render_present(&self) -> Result<(), String> {

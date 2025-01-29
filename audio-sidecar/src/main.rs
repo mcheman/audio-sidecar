@@ -12,7 +12,6 @@ use sdl3_sys::everything::*;
 use std::any::Any;
 use std::backtrace::Backtrace;
 use std::path::Path;
-use std::process::exit;
 use std::str::FromStr;
 use std::time::{Duration, Instant};
 use std::{env, io, panic};
@@ -20,6 +19,7 @@ use tracing::Level;
 use tracing_subscriber::fmt::writer::MakeWriterExt;
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::{fmt, layer::SubscriberExt};
+use crate::gui::{Input, UI};
 
 mod config;
 mod flac;
@@ -51,8 +51,6 @@ mod utils;
 
 // todo periodically check if new audio devices have been added (especially if none of the ideal ones are detected yet), see getaudiorecordingdevices or eventing
 // todo assign flac album cover art to image it was created for with extra audio icon????
-
-// todo load values from config file: interface text to search for,
 
 // todo try to select the first audio input, or test both inputs to see which has any audio signal and use that one
 // todo display a user facing message about needing to turn the audio interface on/plug in if it isn't detected
@@ -149,6 +147,7 @@ pub fn main() {
         recording_devices.len(),
         config.interface
     );
+
     for device in recording_devices {
         let found = if device
             .name
@@ -186,9 +185,6 @@ pub fn main() {
     let mut mouse_y: f32 = 0.0;
     let mut paused = false;
 
-    let mut is_clicking_save = false;
-    let mut is_clicking_pause = false;
-
     let mut sample_count = 0u64;
 
     let filename_base = filepath
@@ -203,7 +199,7 @@ pub fn main() {
 
     if std::fs::exists(&outputfile).unwrap_or(true) {
         // fail safely, assume conflict if can't determine
-        // todo handle exists() io failure and logging explicitly
+        // todo handle exists() result io failure and logging explicitly
         info!("File exists at \"{}\"", outputfile.display());
 
         match config.existing_file_strategy {
@@ -249,6 +245,9 @@ pub fn main() {
     let mut framespersec = 0.0;
     let mut start_sec = Instant::now();
 
+    let mut ui = UI::new();
+    let mut input = Input::default();
+
     loop {
         // poll until all events are handled and the queue runs dry
         while let Some(event) = sdl::poll_event() {
@@ -266,12 +265,15 @@ pub fn main() {
                     } else if event_type == SDL_EventType::MOUSE_BUTTON_UP {
                         clicking = false;
                     }
+                    input.mouse_button_pressed = clicking;
                 }
                 Event::Motion(event_type, e) => {
                     if event_type == SDL_EventType::MOUSE_MOTION {
                         mouse_x = e.x;
                         mouse_y = e.y;
                     }
+                    input.mouse_x = mouse_x;
+                    input.mouse_y = mouse_y;
                 }
                 Event::Quit(_) => {
                     return save_and_quit(&gfx, encoder, logical_interface_id, audio_stream);
@@ -279,6 +281,8 @@ pub fn main() {
                 _ => continue,
             }
         }
+
+        ui.apply_input(&input);
 
         let mut samples = match sdl::get_audio_stream_data_i32(audio_stream) {
             Ok(s) => s,
@@ -297,7 +301,7 @@ pub fn main() {
             let mut max_sample = 0;
             for n in 0..previous_unchunked_samples.len() / CHUNKSIZE {
                 for i in 0..CHUNKSIZE {
-                    let v = (previous_unchunked_samples[n * CHUNKSIZE + i] as i64).abs() as u32;
+                    let v = previous_unchunked_samples[n * CHUNKSIZE + i].unsigned_abs();
                     if v > max_sample {
                         max_sample = v;
                     }
@@ -342,50 +346,37 @@ pub fn main() {
 
         let button_width = 300.0;
         let button_height = 100.0 - BORDER_SIZE * 3.0;
-        if gui::button(
+        if ui.button(
             &gfx,
             "Save Audio",
             window_width as f32 - BORDER_SIZE - button_width,
             window_height as f32 - BORDER_SIZE - button_height,
             button_width,
-            button_height,
-            mouse_x,
-            mouse_y,
-            clicking,
-        ) && !is_clicking_save
+            button_height
+        )
         {
             info!("pressed save audio button");
-
-            is_clicking_save = true;
 
             return save_and_quit(&gfx, encoder, logical_interface_id, audio_stream);
         }
 
+        // todo this button should be on the opposite side of the save/quit button to reduce accidental clicks closing the window
         let p_button_width = 100.0 - BORDER_SIZE * 3.0;
         let p_button_height = 100.0 - BORDER_SIZE * 3.0;
-        if gui::button(
+        if ui.button(
             &gfx,
             if paused { "|>" } else { "||" },
             window_width as f32 - BORDER_SIZE - button_width - p_button_width - BORDER_SIZE,
             window_height as f32 - BORDER_SIZE - button_height,
             p_button_width,
-            p_button_height,
-            mouse_x,
-            mouse_y,
-            clicking,
-        ) && !is_clicking_pause
+            p_button_height
+        )
         {
             info!("pressed play/pause audio button");
             paused = !paused;
-            is_clicking_pause = true;
         }
 
         // todo do a quick fade between paused sections of audio
-
-        if !clicking {
-            is_clicking_pause = false;
-            is_clicking_save = false;
-        }
 
         if max_time.elapsed().as_secs_f64() > 5.0 {
             max_frame_time = 0.0;
@@ -396,20 +387,23 @@ pub fn main() {
         if elapsed > max_frame_time {
             max_frame_time = elapsed;
         }
-        gui::draw_text(
-            &gfx,
-            format!(
-                "frametime: {:.2}ms fps: {}",
-                max_frame_time * 1000.0,
-                framespersec
-            )
-            .as_str(),
-            BORDER_SIZE,
-            BORDER_SIZE,
-            1.0,
-            false,
-            false,
-        );
+
+        // todo toggle debug text on and off through config file
+        let mut debug_text = format!("frametime: {:.2}ms\n", max_frame_time * 1000.0);
+        debug_text += format!("fps: {}\n", framespersec).as_str();
+        debug_text += format!("samples: {}\n", sample_count).as_str();
+        debug_text += format!(
+            "data size: {:.1}MiB\n",
+            sample_count as f64 * 4.0 / 1024.0 / 1024.0
+        )
+        .as_str();
+        debug_text += format!(
+            "waveform size: {:.1}MiB\n",
+            display_waveform.len() as f64 * 4.0 / 1024.0 / 1024.0
+        )
+        .as_str();
+        gui::debug_view(&gfx, debug_text.as_str());
+
         or_die(gfx.render_present());
         frames += 1;
         frame_time = Instant::now();

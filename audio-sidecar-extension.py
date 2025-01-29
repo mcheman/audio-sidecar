@@ -13,8 +13,6 @@ import subprocess
 
 
 class AudioSidecarExtension(GObject.GObject, Nautilus.MenuProvider):
-    # VALID_MIMETYPES = ('image/png', 'image/jpeg')
-
     def __init__(self):
         super().__init__()
 
@@ -31,8 +29,8 @@ class AudioSidecarExtension(GObject.GObject, Nautilus.MenuProvider):
             self,
             files: List[Nautilus.FileInfo],
     ) -> List[Nautilus.MenuItem]:
-        # if len(files) != 1 or files[0].get_mime_type() not in self.VALID_MIMETYPES:
-        #     return []
+        if len(files) != 1:
+            return []
 
         file = files[0]
 
