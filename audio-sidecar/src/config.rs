@@ -8,6 +8,7 @@ pub struct ProgramConfig {
     pub log_file: String,
     pub log_level: String,
     pub existing_file_strategy: ExistingFileStrategy,
+    pub shift_gain: i32,
 }
 
 // todo should we be wrapping the config like this? It seems like the underlying Config is meant to be used directly to allow hot-reloading
@@ -28,6 +29,7 @@ impl ProgramConfig {
             .get("LogFile")
             .unwrap_or(String::from("audioSidecar.log"));
         let log_level: String = settings.get("LogLevel").unwrap_or(String::from("debug"));
+        let shift_gain: i32 = settings.get("ShiftGain").unwrap_or(0);
 
         let existing_file_strategy = ExistingFileStrategy::from_str(
             settings
@@ -44,6 +46,7 @@ impl ProgramConfig {
             log_file,
             log_level,
             existing_file_strategy,
+            shift_gain
         })
     }
 }

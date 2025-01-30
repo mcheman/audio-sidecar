@@ -293,7 +293,7 @@ pub fn flush_audio_stream(stream: *mut SDL_AudioStream) -> Result<(), String> {
 
 // get all samples of pending audio
 // todo enforce audio is in i32 format when calling this function
-pub fn get_audio_stream_data_i32(stream: *mut SDL_AudioStream) -> Result<Vec<i32>, String> {
+pub fn get_audio_stream_data_i32(stream: *mut SDL_AudioStream, shift_gain: i32) -> Result<Vec<i32>, String> {
     let mut samples = Vec::with_capacity(1024);
 
     let mut sample_buffer = [0i32; 1024];
@@ -314,7 +314,7 @@ pub fn get_audio_stream_data_i32(stream: *mut SDL_AudioStream) -> Result<Vec<i32
 
         for i in 0..(min(sample_buffer.len(), samples_read)) {
             // clip audio to 24 bits by removing quietest 8 bits
-            samples.push(sample_buffer[i] >> 8);
+            samples.push((sample_buffer[i] << shift_gain) >> 8);
         }
     }
 

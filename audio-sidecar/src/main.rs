@@ -280,7 +280,7 @@ pub fn main() {
                     input.mouse_y = mouse_y;
                 }
                 Event::Quit(_) => {
-                    return save_and_quit(&ui, encoder, logical_interface_id, audio_stream);
+                    return save_and_quit(&config, &ui, encoder, logical_interface_id, audio_stream);
                 }
                 _ => continue,
             }
@@ -288,7 +288,7 @@ pub fn main() {
 
         ui.apply_input(&input);
 
-        let mut samples = match sdl::get_audio_stream_data_i32(audio_stream) {
+        let mut samples = match sdl::get_audio_stream_data_i32(audio_stream, config.shift_gain) {
             Ok(s) => s,
             Err(msg) => die(format!("SDL GetAudioStreamData failed: {}", msg).as_str()),
         };
@@ -372,7 +372,7 @@ pub fn main() {
         ) {
             info!("pressed save audio button");
 
-            return save_and_quit(&ui, encoder, logical_interface_id, audio_stream);
+            return save_and_quit(&config, &ui, encoder, logical_interface_id, audio_stream);
         }
 
         // todo do a quick fade between paused sections of audio
@@ -416,6 +416,7 @@ pub fn main() {
 }
 
 fn save_and_quit(
+    config: &ProgramConfig,
     ui: &UI,
     encoder: Encoder,
     logical_interface_id: SDL_AudioDeviceID,
@@ -431,7 +432,7 @@ fn save_and_quit(
     sdl::close_audio_device(logical_interface_id);
 
     // get last bit of audio
-    let samples = match sdl::get_audio_stream_data_i32(audio_stream) {
+    let samples = match sdl::get_audio_stream_data_i32(audio_stream, config.shift_gain) {
         Ok(s) => s,
         Err(msg) => die(format!("SDL GetAudioStreamData failed: {}", msg).as_str()),
     };

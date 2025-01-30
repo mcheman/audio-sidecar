@@ -36,3 +36,5 @@ LogFile = "as.log"
 # LogLevel debug | info | error
 #
 LogLevel = "debug"
+
+ShiftGain = 0

@@ -252,7 +252,7 @@ impl UI {
             .enumerate()
         {
             // if clipped, draw as red
-            if *m >= MAX_AMPLITUDE - 1 {
+            if *m >= MAX_AMPLITUDE - 6 {
                 if col > max_col.saturating_sub(20) {
                     // if this is one of the most recent samples
                     is_clipping_now = true;
