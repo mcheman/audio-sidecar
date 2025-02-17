@@ -1,7 +1,7 @@
 use std::env;
 use std::path::PathBuf;
 
-const VERSION: &str = "1.4.3";
+const VERSION: &str = "1.5.0";
 
 // this static links
 fn main() {
