@@ -37,4 +37,5 @@ LogFile = "as.log"
 #
 LogLevel = "debug"
 
+# Hack to apply a bitshift to the waveform to amplifiy it
 ShiftGain = 0

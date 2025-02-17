@@ -8,7 +8,7 @@ use crate::gui::{Input, UI};
 use crate::sdl::Event;
 use crate::utils::die;
 use crate::utils::or_die;
-use log::{debug, error, info};
+use log::{debug, error, info, warn};
 use sdl3_sys::everything::*;
 use std::any::Any;
 use std::backtrace::Backtrace;
@@ -29,21 +29,12 @@ mod utils;
 // todo copious error checking
 // todo save performance stats and/or performance stats outside of normal
 // todo if audio is for an image, load a thumbnail and display it so it's clearer which file the audio will be associated with. Loading thumbnails rather than the image itself should be both faster and have fewer file formats to deal with. We could even try to load _any_ thumbnail that matches the file in question, say for video files, since we'll only care if there _is_ one. See https://askubuntu.com/questions/1368910/how-to-create-custom-thumbnailers-for-nautilus-nemo-and-caja and https://specifications.freedesktop.org/thumbnail-spec/latest/thumbsave.html
-// todo Audio should be saved periodically to some temporary location (or merely the final desired location!) and always on quit in case the wrong button is pressed. Potentially, the audio could be moved to trash if the X button was clicked, rather than save. Or use hidden files, but what would clean them up?
-// todo MVP should ONLY record at end of existing audio.
 
 // todo add error checking, logging, and dad friendly error reporting
 // todo add safeguards such as not overwriting existing recordings and/or saving old recordings to a backup directory on overwrite
 // todo append new data to file and fixup header when recording to an existing file
-// todo show time recorded so far
-// todo add big button to stop recording/exit
 // todo handle multiple paths sent to this program i.e. drop everything after first
-// todo clean up visualization
-// todo warn when clipping occurs
-// todo figure out how to add to right click menu in nautilus without additional click into scripts submenu
-// todo test on other distros
 // todo organize better / refactor / split into separate source files
-// todo add message when quitting if writing out is taking awhile (though probably not needed if writing out as we go)
 // todo create a slideshow application that plays the audio with the corresponding picture, advancing to the next once the audio is done. slideshow will play everything in directory
 // todo   add optional "music" for background since he wants to put specific music in the background.
 // todo   slideshow will also display metadata that was entered such as title and comments etc
@@ -52,15 +43,17 @@ mod utils;
 // todo periodically check if new audio devices have been added (especially if none of the ideal ones are detected yet), see getaudiorecordingdevices or eventing
 // todo assign flac album cover art to image it was created for with extra audio icon????
 
-// todo try to select the first audio input, or test both inputs to see which has any audio signal and use that one
+// todo try to select the first audio input if multiple matches, or test both inputs to see which has any audio signal and use that one
 // todo display a user facing message about needing to turn the audio interface on/plug in if it isn't detected
-// todo capture and log panics/backtraces
-// todo replace flacenc with reference libFLAC ffi encoder due to quality concerns (author has not maintained library recently, noticed missing metadata when looking at file in nautilus right click menu, one program failed to load these flac files (sound converter), and there was at least one instance where audio was saved distorted)
 // todo analyze the audio recorded so far and if its max amplitude (when excluding a few outliers??? like loud pops?) is too low, show a message to raise the gain. Similarly, if clipping regularly, show message asking to lower gain
 // todo rearrange code so as much as possible can be tested via test runners
-// todo enforce minimum window size to avoid losing the window if it's resized to tiny size
 // todo add sdl3_ttf via bindgen ffi like with libFLAC
 // todo build action in ci with auto released artifacts?
+// todo BUG?? Some audio files saved at dad's are long and completely silent (note that these were likely on the first version which did not work. audio modification dates are 2 months before first successful deploy)
+// todo BUG scarlett gen 3 audio interface on ubuntu 22.04 does not hit max amplitude (and can't be bit shifted perfectly to max)
+// todo BUG scarlett gen 3 audio interface on ubuntu 22.04 does not start returning audio samples for a second when the program first opens
+// todo add a .desktop file and way to launch program which will ask where to save on launch (since there isn't a cli arg)????
+// todo ensure audio filename isn't too long. adding _audio.flac to the end of a filename at the limit will fail to save. Must truncate at end until file can save
 
 // redirect panics to log file. woe is me if this panics within the logger itself
 fn handle_panic(payload: &(dyn Any + Send), backtrace: Backtrace) {
@@ -98,7 +91,7 @@ pub fn main() {
     subscriber.init();
 
     panic::set_hook(Box::new(|info| {
-        let backtrace = std::backtrace::Backtrace::force_capture();
+        let backtrace = Backtrace::force_capture();
         handle_panic(info.payload(), backtrace)
     }));
 
@@ -167,6 +160,10 @@ pub fn main() {
         info!("\t{} {}", device.name, found);
     }
 
+    if desired_interface_id == SDL_AUDIO_DEVICE_DEFAULT_RECORDING {
+        warn!("No interface match found. Using sdl default recording device")
+    }
+
     let logical_interface_id = match sdl::open_audio_device(desired_interface_id) {
         Ok(i) => i,
         Err(msg) => die(format!("SDL could not open audio device: {}", msg).as_str()),
@@ -190,6 +187,7 @@ pub fn main() {
     let mut paused = false;
 
     let mut sample_count = 0u64;
+    let mut max_sample_amplitude = 0u32;
 
     let filename_base = filepath
         .with_extension("")
@@ -280,7 +278,15 @@ pub fn main() {
                     input.mouse_y = mouse_y;
                 }
                 Event::Quit(_) => {
-                    return save_and_quit(&config, &ui, encoder, logical_interface_id, audio_stream);
+                    return save_and_quit(
+                        &config,
+                        &ui,
+                        encoder,
+                        logical_interface_id,
+                        audio_stream,
+                        sample_count,
+                        max_sample_amplitude,
+                    );
                 }
                 _ => continue,
             }
@@ -295,6 +301,11 @@ pub fn main() {
 
         if !paused {
             sample_count += samples.len() as u64;
+            for s in samples.iter() {
+                if s.saturating_abs() as u32 > max_sample_amplitude {
+                    max_sample_amplitude = s.saturating_abs() as u32;
+                }
+            }
 
             or_die(encoder.encode(&samples)); // encode and save to file as we go
 
@@ -372,7 +383,15 @@ pub fn main() {
         ) {
             info!("pressed save audio button");
 
-            return save_and_quit(&config, &ui, encoder, logical_interface_id, audio_stream);
+            return save_and_quit(
+                &config,
+                &ui,
+                encoder,
+                logical_interface_id,
+                audio_stream,
+                sample_count,
+                max_sample_amplitude,
+            );
         }
 
         // todo do a quick fade between paused sections of audio
@@ -421,6 +440,8 @@ fn save_and_quit(
     encoder: Encoder,
     logical_interface_id: SDL_AudioDeviceID,
     audio_stream: *mut SDL_AudioStream,
+    sample_count: u64,
+    mut max_sample_amplitude: u32,
 ) {
     info!("Shutdown triggered");
 
@@ -437,12 +458,25 @@ fn save_and_quit(
         Err(msg) => die(format!("SDL GetAudioStreamData failed: {}", msg).as_str()),
     };
 
+    for s in samples.iter() {
+        if s.saturating_abs() as u32 > max_sample_amplitude {
+            max_sample_amplitude = s.saturating_abs() as u32;
+        }
+    }
+
     debug!("Finalizing audio to disk...");
 
     or_die(encoder.encode(&samples));
     or_die(encoder.finish());
 
-    info!("Audio saved");
+    info!(
+        "Audio saved. Samples: {} Seconds: {:.1} Max Amplitude: {} Max Amplitude Bits: {:.2}",
+        sample_count,
+        sample_count as f64 / 44100.0,
+        max_sample_amplitude,
+        (max_sample_amplitude as f64).log2()
+
+    );
     ui.hide();
 
     let success_sound = match sdl::loadwav("success.wav") {
